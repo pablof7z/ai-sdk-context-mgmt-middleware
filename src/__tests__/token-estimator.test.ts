@@ -1,52 +1,48 @@
 import { describe, test, expect } from "bun:test";
-import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import { createDefaultEstimator } from "../token-estimator.js";
+import type { ContextMessage } from "../types.js";
 
 const estimator = createDefaultEstimator();
 
 describe("createDefaultEstimator", () => {
-  test("estimates string tokens at ~4 chars per token", () => {
+  test("estimates strings at roughly four chars per token", () => {
     expect(estimator.estimateString("")).toBe(0);
-    expect(estimator.estimateString("hello")).toBe(2); // 5/4 = 1.25 → ceil = 2
+    expect(estimator.estimateString("hello")).toBe(2);
     expect(estimator.estimateString("a".repeat(100))).toBe(25);
   });
 
-  test("estimates system message with overhead", () => {
-    const msg: LanguageModelV3Message = { role: "system", content: "You are helpful." };
-    // 16 chars / 4 = 4 tokens + 4 overhead = 8
-    expect(estimator.estimateMessage(msg)).toBe(8);
-  });
-
-  test("estimates user message with text parts", () => {
-    const msg: LanguageModelV3Message = {
+  test("estimates message overhead", () => {
+    const message: ContextMessage = {
+      id: "msg-1",
       role: "user",
-      content: [{ type: "text", text: "Hello, how are you?" }],
+      entryType: "text",
+      content: "Hello, world!",
     };
-    // 19 chars / 4 = 4.75 → ceil = 5 + 4 overhead = 9
-    expect(estimator.estimateMessage(msg)).toBe(9);
+
+    expect(estimator.estimateMessage(message)).toBe(8);
   });
 
-  test("estimates tool-call message", () => {
-    const msg: LanguageModelV3Message = {
-      role: "assistant",
-      content: [
-        { type: "tool-call", toolCallId: "c1", toolName: "search", args: { q: "test" } },
-      ],
+  test("includes tool metadata in estimates", () => {
+    const message: ContextMessage = {
+      id: "call-1:result",
+      role: "tool",
+      entryType: "tool-result",
+      content: "search output",
+      toolCallId: "call-1",
+      toolName: "search",
     };
-    const tokens = estimator.estimateMessage(msg);
-    expect(tokens).toBeGreaterThan(4); // at least overhead
+
+    expect(estimator.estimateMessage(message)).toBeGreaterThan(8);
   });
 
-  test("estimates multiple messages", () => {
-    const msgs: LanguageModelV3Message[] = [
-      { role: "system", content: "System" },
-      { role: "user", content: [{ type: "text", text: "User" }] },
+  test("sums multiple messages", () => {
+    const messages: ContextMessage[] = [
+      { id: "s1", role: "system", entryType: "text", content: "System prompt" },
+      { id: "u1", role: "user", entryType: "text", content: "User prompt" },
     ];
-    const total = estimator.estimateMessages(msgs);
-    expect(total).toBe(estimator.estimateMessage(msgs[0]) + estimator.estimateMessage(msgs[1]));
-  });
 
-  test("handles empty messages array", () => {
-    expect(estimator.estimateMessages([])).toBe(0);
+    expect(estimator.estimateMessages(messages)).toBe(
+      estimator.estimateMessage(messages[0]) + estimator.estimateMessage(messages[1])
+    );
   });
 });

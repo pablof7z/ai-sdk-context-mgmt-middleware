@@ -1,7 +1,7 @@
 {
   "name": "ai-sdk-context-mgmt-middleware",
   "version": "0.1.0",
-  "description": "AI SDK v6 middleware for context window management with two-tier compression",
+  "description": "Reusable context management engine and AI SDK middleware for segment-based transcript compression",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,10 +25,10 @@
   "keywords": [
     "ai-sdk",
     "middleware",
-    "context-window",
+    "context-management",
+    "transcript",
     "compression",
-    "llm",
-    "token-management"
+    "segments"
   ],
   "license": "MIT",
   "repository": {

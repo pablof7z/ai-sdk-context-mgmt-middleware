@@ -1,15 +1,23 @@
 # ai-sdk-context-mgmt-middleware
 
-AI SDK v6 middleware for intelligent context window management. Automatically compresses conversation history to fit within token limits using a two-tier pipeline.
+Reusable context management for AI SDK apps and Tenex-class systems.
 
-## How It Works
+The package has two layers:
+- a pure context engine that works on normalized transcript entries
+- a thin AI SDK middleware adapter that rewrites the outgoing prompt and persists summary segments through a host-owned store
 
-When conversation history approaches the context window limit, the middleware intercepts `transformParams` and applies compression in two tiers:
+## What It Does
 
-1. **Rule-based compression** (fast, no LLM calls): Truncates/removes tool outputs based on policies, applies age-based decay
-2. **LLM-assisted compression** (when rule-based isn't enough): Uses a separate LLM to summarize conversation segments
+On each turn the engine:
+1. normalizes the full `messages[]` array into addressable entries
+2. always applies tool output truncation/removal rules
+3. reapplies any previously persisted summary segments
+4. checks the token budget after those transforms
+5. if still above the compression threshold, renders the newest unsummarized block before the protected tail into a transcript and asks an LLM for 1 or more replacement segments
+6. applies those segments and returns the rewritten messages
+7. enforces a final hard token budget fallback if the prompt is still too large
 
-The middleware tracks token usage and only activates when the estimated token count exceeds the configured threshold.
+This keeps segment state outside the middleware. Hosts own persistence.
 
 ## Installation
 
@@ -17,189 +25,174 @@ The middleware tracks token usage and only activates when the estimated token co
 npm install ai-sdk-context-mgmt-middleware
 ```
 
-## Quick Start
+## Pure Engine
 
-```typescript
-import { contextManagement } from "ai-sdk-context-mgmt-middleware";
-import { wrapLanguageModel } from "ai";
-import { generateText, streamText } from "ai";
-import { openai } from "@ai-sdk/openai";
+```ts
+import { manageContext, createSegmentGenerator } from "ai-sdk-context-mgmt-middleware";
 
-// Create the middleware
-const middleware = contextManagement({
-  maxTokens: 128_000,
-  compressionThreshold: 0.8, // Compress when 80% full
+const segmentGenerator = createSegmentGenerator({
+  async generate(prompt) {
+    return await cheapModel(prompt);
+  },
 });
 
-// Wrap your model with the middleware
+const result = await manageContext({
+  messages: conversationEntries,
+  maxTokens: 128_000,
+  compressionThreshold: 0.8,
+  protectedTailCount: 4,
+  existingSegments: persistedSegments,
+  segmentGenerator,
+  toolOutput: {
+    defaultPolicy: "truncate",
+    maxTokens: 300,
+    recentFullCount: 2,
+    toolOverrides: {
+      fs_read: "truncate",
+      debug_logs: "remove",
+      final_report: "keep",
+    },
+  },
+});
+
+// result.messages: rewritten transcript entries
+// result.appliedSegments: canonical segment set for persistence
+// result.newSegments: only the segments created on this turn
+```
+
+## AI SDK Middleware
+
+```ts
+import { wrapLanguageModel } from "ai";
+import { openai } from "@ai-sdk/openai";
+import {
+  createCompressionCache,
+  createContextManagementMiddleware,
+  createSegmentGenerator,
+} from "ai-sdk-context-mgmt-middleware";
+
+const segmentStore = new Map<string, any[]>();
+
+const middleware = createContextManagementMiddleware({
+  maxTokens: 128_000,
+  compressionThreshold: 0.8,
+  protectedTailCount: 4,
+  cache: createCompressionCache({ maxEntries: 100 }),
+  segmentStore: {
+    load: (conversationKey) => segmentStore.get(conversationKey) ?? [],
+    save: (conversationKey, segments) => {
+      segmentStore.set(conversationKey, segments);
+    },
+  },
+  resolveConversationKey({ params }) {
+    return (params.providerOptions as any).contextManagement.conversationId;
+  },
+  segmentGenerator: createSegmentGenerator({
+    async generate(prompt) {
+      return await cheapModel(prompt);
+    },
+  }),
+  toolOutput: {
+    defaultPolicy: "truncate",
+    maxTokens: 300,
+    recentFullCount: 2,
+  },
+});
+
 const model = wrapLanguageModel({
   model: openai("gpt-4o"),
   middleware,
 });
-
-// Use with generateText
-const result = await generateText({
-  model,
-  messages: conversationHistory, // Can be arbitrarily long
-});
-
-// Or with streamText
-const stream = streamText({
-  model,
-  messages: conversationHistory,
-});
 ```
 
-The middleware transparently compresses the messages array before it reaches the model. Your application code doesn't need to change.
+`createContextManagementMiddleware` is also exported as `contextManagement`.
 
-## Configuration
+## Transcript Rendering
 
-```typescript
-const middleware = contextManagement({
-  // Required: maximum context window size
-  maxTokens: 128_000,
+`createTranscript(entries, options?)` renders normalized entries into a transcript string and returns:
+- `text`
+- `shortIdMap`
+- `firstId`
+- `lastId`
 
-  // When to start compressing (0-1, default 0.8)
-  compressionThreshold: 0.8,
+The built-in renderer emits an XML-like transcript because it works well for structured LLM compression, but the API is generic and accepts a custom `TranscriptRenderer`.
 
-  // How many recent messages to never compress (default 4)
-  protectedMessageCount: 4,
+## Segment Generation
 
-  // Tool output handling (see below)
-  toolOutputPolicy: { /* ... */ },
+`SegmentGenerator` implementations receive:
+- `transcript`
+- `targetTokens`
+- `messages`
+- `previousSegments`
 
-  // LLM compressor for tier-2 (optional)
-  llmCompressor: createLLMCompressor({ /* ... */ }),
+They return structured segments:
 
-  // Cache for compression results (optional)
-  cache: createCompressionCache({ maxEntries: 100 }),
-
-  // Hook: called when tool outputs are truncated/removed
-  onToolOutputTruncated: async (event) => { /* ... */ },
-
-  // Debug callback
-  onDebug: (info) => console.log(info),
-});
+```ts
+[{ fromId, toId, compressed }]
 ```
 
-### Tool Output Policies
+Use `createSegmentGenerator(...)` for a default JSON-based helper, or provide your own implementation.
 
-Control how tool call results are handled during compression. Policies are: `"keep"`, `"truncate"`, or `"remove"`.
+## Segment Persistence
 
-```typescript
-const middleware = contextManagement({
-  maxTokens: 128_000,
-  toolOutputPolicy: {
-    defaultPolicy: "truncate",
-    maxOutputTokens: 500,
-    perTool: {
-      search_results: { policy: "truncate", maxTokens: 200 },
-      get_file: { policy: "truncate", maxTokens: 1000 },
-      debug_logs: { policy: "remove" },
-      important_data: { policy: "keep" },
-    },
-  },
-});
+The middleware does not keep hidden conversation state.
+
+If you want summary chunks to be reused on the next turn, provide a `SegmentStore` and a `resolveConversationKey(...)` function. The middleware will:
+- `load(conversationKey)` before compression
+- `save(conversationKey, appliedSegments)` or `append(conversationKey, newSegments)` after compression
+
+Append-only stores are supported because the engine only creates new segments for the newest unsummarized block before the protected tail.
+
+## Tool Output Policy
+
+Tool output policy is always applied, even when the conversation is still below the LLM compression threshold.
+
+Policies:
+- `keep`
+- `truncate`
+- `remove`
+
+Optional hook:
+
+```ts
+onToolOutputTruncated: async (event) => {
+  const storageId = await ragStore.save(event.originalOutput);
+  return `[Tool output stored externally. Retrieve with rag_get("${storageId}")]`;
+}
 ```
 
-### Tool Output Truncation Hook
+## Hard Budget Fallback
 
-Get notified when tool outputs are compressed, and optionally provide replacement text (e.g., with retrieval instructions pointing to a RAG store):
+If tool policy plus segment compression still do not fit `maxTokens`, the engine drops older history until the prompt fits and inserts:
 
-```typescript
-const middleware = contextManagement({
-  maxTokens: 128_000,
-  onToolOutputTruncated: async (event) => {
-    // event.toolName - which tool's output was truncated
-    // event.toolCallId - the tool call ID
-    // event.originalOutput - the full original output text
-    // event.originalTokens - token estimate of original
-    // event.removed - true if completely removed, false if truncated
-
-    // Store original output externally
-    const storageId = await ragStore.save(event.originalOutput);
-
-    // Return replacement text (optional - default truncation text used if undefined)
-    return `[Output stored. Retrieve with: rag_get("${storageId}")]`;
-  },
-});
+```txt
+[Earlier conversation truncated to fit token budget]
 ```
 
-### LLM-Assisted Compression
-
-For deeper compression when rule-based isn't enough, provide an LLM compressor:
-
-```typescript
-import { createLLMCompressor } from "ai-sdk-context-mgmt-middleware";
-import { openai } from "@ai-sdk/openai";
-
-const middleware = contextManagement({
-  maxTokens: 128_000,
-  llmCompressor: createLLMCompressor({
-    model: openai("gpt-4o-mini"), // Cheap model for summarization
-    maxSummaryTokens: 500,
-  }),
-});
-```
-
-### Caching
-
-Avoid re-compressing the same messages:
-
-```typescript
-import { createCompressionCache } from "ai-sdk-context-mgmt-middleware";
-
-const middleware = contextManagement({
-  maxTokens: 128_000,
-  cache: createCompressionCache({ maxEntries: 100 }),
-});
-```
-
-## Architecture
-
-```
-transformParams interceptor
-  ├─ Estimate token count
-  ├─ Below threshold? → pass through unchanged
-  └─ Above threshold?
-      ├─ Check cache → hit? return cached
-      ├─ Tier 1: Rule-based compression
-      │   ├─ Apply tool output policies (keep/truncate/remove)
-      │   ├─ Fire onToolOutputTruncated hooks
-      │   └─ Age-based decay (older messages treated more aggressively)
-      ├─ Still over limit?
-      │   └─ Tier 2: LLM-assisted compression
-      │       └─ Summarize oldest message segments
-      ├─ Cache result
-      └─ Return compressed messages
-```
+This is a last-resort safety brake for provider calls.
 
 ## API
 
-### `contextManagement(config)`
+Primary exports:
+- `manageContext(config)`
+- `createContextManagementMiddleware(config)`
+- `createTranscript(messages, options?)`
+- `applySegments(messages, segments)`
+- `validateSegments(messages, segments, options?)`
+- `createSegmentGenerator(config)`
+- `createCompressionCache(options?)`
+- `createDefaultEstimator()`
 
-Creates middleware compatible with AI SDK v6's `wrapLanguageModel`. Returns a `LanguageModelMiddleware` object.
+Adapter helpers:
+- `normalizeMessages(messages)`
+- `promptToContextMessages(prompt)`
+- `contextMessagesToPrompt(messages)`
 
-### `createDefaultEstimator(charsPerToken?: number)`
+## Notes
 
-Creates a token estimator using character-ratio heuristic. Default ratio is 4 chars/token.
-
-### `createLLMCompressor(options)`
-
-Creates an LLM-based compressor for tier-2 compression.
-
-- `options.model` — AI SDK language model instance for summarization
-- `options.maxSummaryTokens` — Max tokens for the summary output (default 500)
-
-### `createCompressionCache(options?)`
-
-Creates an in-memory LRU cache for compression results.
-
-- `options.maxEntries` — Maximum cache entries (default 50)
-
-### `hashMessages(messages)`
-
-Generates a content hash for a message array (useful for custom caching).
+- Plain text entries get deterministic short IDs from `role + content`; duplicates are suffixed with `-2`, `-3`, etc.
+- Tool-call and tool-result entries derive stable IDs from the AI SDK tool call ID.
+- The package is text-first. Hosts should normalize multimodal content before compression if they need more control.
 
 ## License
 

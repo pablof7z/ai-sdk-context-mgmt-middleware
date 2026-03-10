@@ -1,20 +1,15 @@
-import type { CompressionCache, CompressionResult } from "./types.js";
+import type { CompressionCache } from "./types.js";
 
-interface CacheEntry {
-  value: CompressionResult;
+interface CacheEntry<T> {
+  value: T;
   lastAccessed: number;
 }
 
-/**
- * Create an LRU compression cache.
- * @param maxEntries Maximum number of cached results (default: 50)
- */
-export function createCompressionCache(
+export function createCompressionCache<T>(
   options: number | { maxEntries?: number } = 50
-): CompressionCache {
-  const maxEntries =
-    typeof options === "number" ? options : (options.maxEntries ?? 50);
-  const store = new Map<string, CacheEntry>();
+): CompressionCache<T> {
+  const maxEntries = typeof options === "number" ? options : (options.maxEntries ?? 50);
+  const store = new Map<string, CacheEntry<T>>();
 
   function evictLRU(): void {
     if (store.size <= maxEntries) return;
@@ -29,18 +24,20 @@ export function createCompressionCache(
       }
     }
 
-    if (oldestKey) store.delete(oldestKey);
+    if (oldestKey) {
+      store.delete(oldestKey);
+    }
   }
 
   return {
-    get(key: string): CompressionResult | undefined {
+    get(key: string): T | undefined {
       const entry = store.get(key);
       if (!entry) return undefined;
       entry.lastAccessed = Date.now();
       return entry.value;
     },
 
-    set(key: string, value: CompressionResult): void {
+    set(key: string, value: T): void {
       store.set(key, { value, lastAccessed: Date.now() });
       evictLRU();
     },
@@ -55,14 +52,17 @@ export function createCompressionCache(
   };
 }
 
-/**
- * djb2 hash function for generating cache keys from message arrays.
- */
-export function hashMessages(messages: unknown[]): string {
-  const str = JSON.stringify(messages);
+export function hashValue(value: unknown): string {
+  const serialized = JSON.stringify(value);
   let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+
+  for (let i = 0; i < serialized.length; i++) {
+    hash = ((hash << 5) + hash + serialized.charCodeAt(i)) | 0;
   }
+
   return (hash >>> 0).toString(36);
+}
+
+export function hashMessages(messages: unknown[]): string {
+  return hashValue(messages);
 }

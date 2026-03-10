@@ -1,59 +1,79 @@
-import type { LanguageModelV3Message } from "@ai-sdk/provider";
+import type { LanguageModelV3Message, LanguageModelV3Middleware } from "@ai-sdk/provider";
 
-/**
- * Token estimation interface. Pluggable to support different estimators
- * (e.g., tiktoken for accuracy, char-based for speed).
- */
+export type ContextRole = "system" | "user" | "assistant" | "tool";
+export type ContextEntryType = "text" | "tool-call" | "tool-result" | "summary";
+
+export interface ContextMessageInput {
+  id?: string;
+  role: ContextRole;
+  content: string;
+  entryType?: ContextEntryType;
+  toolCallId?: string;
+  toolName?: string;
+  timestamp?: number;
+  attributes?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ContextMessage extends ContextMessageInput {
+  id: string;
+  entryType: ContextEntryType;
+}
+
+export interface CompressionSegment {
+  fromId: string;
+  toId: string;
+  compressed: string;
+  createdAt?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TranscriptRenderResult {
+  text: string;
+  shortIdMap: Map<string, string>;
+  firstId: string | null;
+  lastId: string | null;
+}
+
+export interface TranscriptRenderOptions {
+  shortIdLength?: number;
+}
+
+export interface TranscriptRenderer {
+  render(messages: ContextMessage[], options?: TranscriptRenderOptions): TranscriptRenderResult;
+}
+
 export interface TokenEstimator {
-  /** Estimate token count for a single message */
-  estimateMessage(message: LanguageModelV3Message): number;
-  /** Estimate token count for an array of messages */
-  estimateMessages(messages: LanguageModelV3Message[]): number;
-  /** Estimate token count for a string */
+  estimateMessage(message: ContextMessage): number;
+  estimateMessages(messages: ContextMessage[]): number;
   estimateString(text: string): number;
 }
 
-/**
- * LLM-assisted compressor interface.
- * Takes conversation messages and a target token count,
- * returns a compressed single-message summary.
- */
-export interface LLMCompressor {
-  compress(
-    messages: LanguageModelV3Message[],
-    targetTokens: number,
-    options?: {
-      systemPrompt?: string;
-    }
-  ): Promise<LanguageModelV3Message[]>;
-}
-
-/**
- * Compression cache interface. Uses LRU eviction by default.
- */
-export interface CompressionCache {
-  get(key: string): CompressionResult | undefined;
-  set(key: string, value: CompressionResult): void;
+export interface CompressionCache<T = ManageContextResult> {
+  get(key: string): T | undefined;
+  set(key: string, value: T): void;
   clear(): void;
-  size: number;
+  readonly size: number;
 }
 
-/**
- * Result of a compression operation, stored in cache.
- */
-export interface CompressionResult {
-  messages: LanguageModelV3Message[];
-  tier: CompressionTier;
-  modifications: CompressionModification[];
-  originalTokenEstimate: number;
-  compressedTokenEstimate: number;
+export type ToolOutputPolicy = "keep" | "truncate" | "remove";
+
+export interface ToolOutputConfig {
+  defaultPolicy?: ToolOutputPolicy;
+  maxTokens?: number;
+  recentFullCount?: number;
+  toolOverrides?: Record<string, ToolOutputPolicy>;
 }
 
-export type CompressionTier = "none" | "rule-based" | "llm-assisted";
+export interface ToolOutputTruncationEvent {
+  toolName: string;
+  toolCallId?: string;
+  messageIndex: number;
+  originalOutput: string;
+  originalTokens: number;
+  removed: boolean;
+}
 
-/**
- * Record of a single modification made during compression.
- */
 export interface CompressionModification {
   type: "tool-output-truncated" | "tool-output-removed" | "message-removed" | "conversation-summarized";
   messageIndex: number;
@@ -61,119 +81,101 @@ export interface CompressionModification {
   compressedTokens: number;
   toolName?: string;
   toolCallId?: string;
-  /** Original text content of the tool output, before compression */
   originalText?: string;
 }
 
-/**
- * Per-tool output compression policy.
- * - "keep": Don't compress this tool's output
- * - "truncate": Shorten to maxTokens with truncation marker
- * - "remove": Replace with "[Tool output removed for brevity]"
- */
-export type ToolOutputPolicy = "keep" | "truncate" | "remove";
-
-/**
- * Tool output compression configuration.
- */
-export interface ToolOutputConfig {
-  /** Default policy for tool outputs not explicitly overridden */
-  defaultPolicy?: ToolOutputPolicy;
-  /** Maximum tokens for truncated tool outputs */
-  maxTokens?: number;
-  /** Number of most recent tool outputs to keep at full fidelity */
-  recentFullCount?: number;
-  /** Per-tool policy overrides keyed by tool name */
-  toolOverrides?: Record<string, ToolOutputPolicy>;
+export interface SegmentGenerationInput {
+  transcript: TranscriptRenderResult;
+  targetTokens: number;
+  messages: ContextMessage[];
+  previousSegments: CompressionSegment[];
 }
 
-/**
- * Event emitted when a tool output is truncated or removed.
- * Consumers can use this to store original output externally
- * and provide retrieval instructions in the replacement text.
- */
-export interface ToolOutputTruncationEvent {
-  /** Name of the tool whose output was truncated */
-  toolName: string;
-  /** The tool call ID, if available */
-  toolCallId?: string;
-  /** Index of the message in the original array */
-  messageIndex: number;
-  /** The original full output text */
-  originalOutput: string;
-  /** Token estimate of the original output */
-  originalTokens: number;
-  /** Whether the output was completely removed vs truncated */
-  removed: boolean;
+export interface SegmentGenerator {
+  generate(input: SegmentGenerationInput): Promise<CompressionSegment[]>;
 }
 
-/**
- * Debug info emitted via onDebug callback after each compression.
- */
+export interface SegmentValidationOptions {
+  requireFullCoverage?: boolean;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+export interface ManageContextStats {
+  originalTokenEstimate: number;
+  postToolPolicyTokenEstimate: number;
+  postSegmentTokenEstimate: number;
+  finalTokenEstimate: number;
+}
+
+export interface ManageContextResult {
+  messages: ContextMessage[];
+  appliedSegments: CompressionSegment[];
+  newSegments: CompressionSegment[];
+  modifications: CompressionModification[];
+  stats: ManageContextStats;
+}
+
+export interface ManageContextConfig {
+  messages: ContextMessageInput[];
+  maxTokens: number;
+  compressionThreshold?: number;
+  protectedTailCount?: number;
+  estimator?: TokenEstimator;
+  segmentGenerator?: SegmentGenerator;
+  transcriptRenderer?: TranscriptRenderer;
+  existingSegments?: CompressionSegment[];
+  toolOutput?: ToolOutputConfig;
+  onToolOutputTruncated?: (
+    event: ToolOutputTruncationEvent
+  ) => string | undefined | void | Promise<string | undefined | void>;
+}
+
 export interface ContextDebugInfo {
-  tier: CompressionTier;
   originalMessageCount: number;
   compressedMessageCount: number;
   originalTokenEstimate: number;
   compressedTokenEstimate: number;
   modifications: CompressionModification[];
+  appliedSegments: CompressionSegment[];
+  newSegments: CompressionSegment[];
   cacheHit: boolean;
   compressionTimeMs: number;
 }
 
-/**
- * Main configuration for the context management middleware.
- */
+export interface SegmentStore {
+  load(conversationKey: string): Promise<CompressionSegment[] | undefined> | CompressionSegment[] | undefined;
+  save?(conversationKey: string, segments: CompressionSegment[]): Promise<void> | void;
+  append?(conversationKey: string, segments: CompressionSegment[]): Promise<void> | void;
+}
+
+export interface MiddlewareContext {
+  params: Record<string, unknown> & { prompt?: LanguageModelV3Message[] };
+  type: string;
+  model: {
+    provider: string;
+    modelId: string;
+  };
+}
+
 export interface ContextManagementConfig {
-  /**
-   * Maximum token budget for the entire prompt (system + conversation).
-   * This should match your model's context window size.
-   */
   maxTokens: number;
-
-  /**
-   * Utilization threshold (0-1) above which rule-based compression activates.
-   * Default: 0.8 (80%)
-   */
-  ruleBasedThreshold?: number;
-
-  /**
-   * Utilization threshold (0-1) above which LLM-assisted compression activates.
-   * Only triggers if rule-based compression was insufficient.
-   * Default: 0.95 (95%)
-   */
-  llmThreshold?: number;
-
-  /**
-   * Number of most recent messages to protect from any compression.
-   * Default: 4
-   */
+  compressionThreshold?: number;
   protectedTailCount?: number;
-
-  /** Token estimator implementation. Uses default char-based estimator if not provided. */
   estimator?: TokenEstimator;
-
-  /** LLM compressor for Tier 2. If not provided, only rule-based compression is available. */
-  llmCompressor?: LLMCompressor;
-
-  /** Compression cache. If not provided, no caching. */
-  cache?: CompressionCache;
-
-  /** Tool output compression configuration */
+  segmentGenerator?: SegmentGenerator;
+  transcriptRenderer?: TranscriptRenderer;
+  segmentStore?: SegmentStore;
+  resolveConversationKey?: (context: MiddlewareContext) => string;
+  cache?: CompressionCache<ManageContextResult>;
   toolOutput?: ToolOutputConfig;
-
-  /** Debug callback invoked after each compression */
   onDebug?: (info: ContextDebugInfo) => void;
-
-  /**
-   * Callback invoked when a tool output is truncated or removed.
-   * Use this to store original output externally (e.g., in a RAG store)
-   * and optionally return replacement text with retrieval instructions.
-   * 
-   * If the callback returns a string, that string replaces the tool output.
-   * If it returns undefined/void, the default truncation/removal text is used.
-   */
   onToolOutputTruncated?: (
     event: ToolOutputTruncationEvent
   ) => string | undefined | void | Promise<string | undefined | void>;
 }
+
+export type ContextManagementMiddleware = LanguageModelV3Middleware;

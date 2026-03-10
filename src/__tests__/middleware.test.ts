@@ -1,42 +1,146 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import { createCompressionCache } from "../cache.js";
-import { contextManagement } from "../middleware.js";
-import { createDefaultEstimator } from "../token-estimator.js";
+import { createContextManagementMiddleware } from "../middleware.js";
 
-const PROMPT: LanguageModelV3Message[] = [
-  {
-    role: "user",
-    content: [{ type: "text", text: "x".repeat(200) }],
-  },
-  {
-    role: "assistant",
-    content: [{ type: "tool-call", toolCallId: "c1", toolName: "search", args: {} }],
-  },
-  {
-    role: "tool",
-    content: [{
-      type: "tool-result",
-      toolCallId: "c1",
-      toolName: "search",
-      content: [{ type: "text", text: "y".repeat(800) }],
-    }],
-  } as any,
-  {
-    role: "user",
-    content: [{ type: "text", text: "z".repeat(200) }],
-  },
-];
+function makePrompt(): LanguageModelV3Message[] {
+  return [
+    { role: "user", content: [{ type: "text", text: "Plan the migration" }] },
+    { role: "assistant", content: [{ type: "text", text: "Collecting the current state" }] },
+    { role: "user", content: [{ type: "text", text: "Focus on compression and persistence" }] },
+    { role: "assistant", content: [{ type: "text", text: "I will keep the latest turn intact" }] },
+  ];
+}
 
-describe("contextManagement", () => {
-  test("does not reuse cached output across middleware configs", async () => {
-    const cache = createCompressionCache();
+describe("createContextManagementMiddleware", () => {
+  test("uses a segment store with an explicit conversation key", async () => {
+    const store = new Map<string, any[]>();
+    let generateCount = 0;
 
-    const strictMiddleware = contextManagement({
-      maxTokens: 50,
-      ruleBasedThreshold: 0,
-      llmThreshold: 1,
+    const middleware = createContextManagementMiddleware({
+      maxTokens: 40,
+      compressionThreshold: 0,
       protectedTailCount: 1,
+      segmentStore: {
+        load(key) {
+          return store.get(key) ?? [];
+        },
+        save(key, segments) {
+          store.set(key, segments);
+        },
+      },
+      resolveConversationKey({ params }) {
+        return ((params as any).providerOptions?.contextManagement?.conversationId ?? "") as string;
+      },
+      segmentGenerator: {
+        async generate({ messages }) {
+          generateCount++;
+          return [{
+            fromId: messages[0].id,
+            toId: messages[messages.length - 1].id,
+            compressed: "stored summary",
+          }];
+        },
+      },
+    });
+
+    const params = {
+      prompt: makePrompt(),
+      providerOptions: {
+        contextManagement: {
+          conversationId: "conv-1",
+        },
+      },
+    } as any;
+
+    const firstResult = await middleware.transformParams?.({
+      params,
+      type: "generate-text" as any,
+      model: { provider: "test", modelId: "shared" } as any,
+    });
+
+    const secondResult = await middleware.transformParams?.({
+      params,
+      type: "generate-text" as any,
+      model: { provider: "test", modelId: "shared" } as any,
+    });
+
+    expect(generateCount).toBe(1);
+    expect(store.get("conv-1")).toHaveLength(1);
+    expect(firstResult?.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "[Compressed history]\nstored summary" }] },
+      makePrompt()[3],
+    ]);
+    expect(secondResult?.prompt).toEqual(firstResult?.prompt);
+  });
+
+  test("preserves tool-call and tool-result adjacency at the protected tail boundary", async () => {
+    const middleware = createContextManagementMiddleware({
+      maxTokens: 500,
+      compressionThreshold: 0,
+      protectedTailCount: 1,
+      segmentGenerator: {
+        async generate({ messages }) {
+          return [{
+            fromId: messages[0].id,
+            toId: messages[messages.length - 1].id,
+            compressed: "summary",
+          }];
+        },
+      },
+    });
+
+    const prompt: LanguageModelV3Message[] = [
+      { role: "user", content: [{ type: "text", text: "question" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "search", input: { q: "x" } }],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "search",
+          output: { type: "text", value: `tool output ${"x".repeat(200)}` },
+        }],
+      },
+    ];
+
+    const result = await middleware.transformParams?.({
+      params: { prompt } as any,
+      type: "generate-text" as any,
+      model: { provider: "test", modelId: "shared" } as any,
+    });
+
+    expect(result?.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "[Compressed history]\nsummary" }] },
+      prompt[1],
+      prompt[2],
+    ]);
+  });
+
+  test("does not leak shared cache results across middleware configs", async () => {
+    const cache = createCompressionCache();
+    const prompt: LanguageModelV3Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "search", input: { q: "x" } }],
+      },
+      {
+        role: "tool",
+        content: [{
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "search",
+          output: { type: "text", value: "y".repeat(800) },
+        }],
+      },
+    ];
+
+    const strictMiddleware = createContextManagementMiddleware({
+      maxTokens: 5_000,
+      compressionThreshold: 1,
       cache,
       toolOutput: {
         defaultPolicy: "remove",
@@ -45,10 +149,9 @@ describe("contextManagement", () => {
       },
     });
 
-    const relaxedMiddleware = contextManagement({
+    const relaxedMiddleware = createContextManagementMiddleware({
       maxTokens: 5_000,
-      ruleBasedThreshold: 0.99,
-      protectedTailCount: 1,
+      compressionThreshold: 1,
       cache,
       toolOutput: {
         defaultPolicy: "keep",
@@ -58,90 +161,17 @@ describe("contextManagement", () => {
     });
 
     const strictResult = await strictMiddleware.transformParams?.({
-      params: { prompt: PROMPT } as any,
+      params: { prompt } as any,
       type: "generate-text" as any,
       model: { provider: "test", modelId: "shared" } as any,
     });
     const relaxedResult = await relaxedMiddleware.transformParams?.({
-      params: { prompt: PROMPT } as any,
-      type: "generate-text" as any,
-      model: { provider: "test", modelId: "shared" } as any,
-    });
-
-    expect(strictResult?.prompt).not.toEqual(PROMPT);
-    expect(relaxedResult?.prompt).toEqual(PROMPT);
-  });
-
-  test("keeps tool-call and tool-result together when protecting the tail", async () => {
-    const middleware = contextManagement({
-      maxTokens: 80,
-      ruleBasedThreshold: 0,
-      llmThreshold: 0,
-      protectedTailCount: 1,
-      llmCompressor: {
-        async compress() {
-          return [{ role: "user", content: [{ type: "text", text: "summary" }] } as any];
-        },
-      },
-    });
-
-    const prompt: LanguageModelV3Message[] = [
-      { role: "user", content: [{ type: "text", text: "question" }] },
-      {
-        role: "assistant",
-        content: [{ type: "tool-call", toolCallId: "c1", toolName: "search", args: { q: "x" } }],
-      },
-      {
-        role: "tool",
-        content: [{
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "search",
-          content: [{ type: "text", text: "tool output " + "x".repeat(200) }],
-        }],
-      } as any,
-    ];
-
-    const result = await middleware.transformParams?.({
       params: { prompt } as any,
       type: "generate-text" as any,
       model: { provider: "test", modelId: "shared" } as any,
     });
 
-    expect(result?.prompt).toEqual([
-      { role: "user", content: [{ type: "text", text: "summary" }] },
-      prompt[1],
-      prompt[2],
-    ]);
-  });
-
-  test("enforces the max token budget when compression is still insufficient", async () => {
-    const estimator = createDefaultEstimator();
-    const middleware = contextManagement({
-      maxTokens: 20,
-      ruleBasedThreshold: 0,
-      protectedTailCount: 1,
-    });
-
-    const prompt: LanguageModelV3Message[] = [
-      { role: "user", content: [{ type: "text", text: "x".repeat(200) }] },
-      { role: "assistant", content: [{ type: "text", text: "y".repeat(200) }] },
-      { role: "user", content: [{ type: "text", text: "z".repeat(200) }] },
-    ];
-
-    const result = await middleware.transformParams?.({
-      params: { prompt } as any,
-      type: "generate-text" as any,
-      model: { provider: "test", modelId: "shared" } as any,
-    });
-
-    expect(result?.prompt).not.toEqual(prompt);
-    expect(estimator.estimateMessages(result?.prompt as LanguageModelV3Message[])).toBeLessThanOrEqual(20);
-    expect(result?.prompt).toEqual([
-      {
-        role: "user",
-        content: [{ type: "text", text: "[Earlier conversation truncated to fit token budget]" }],
-      },
-    ]);
+    expect(strictResult?.prompt).not.toEqual(prompt);
+    expect(relaxedResult?.prompt).toEqual(prompt);
   });
 });

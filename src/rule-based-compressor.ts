@@ -1,55 +1,34 @@
-import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import type {
+  CompressionModification,
+  ContextMessage,
   TokenEstimator,
   ToolOutputConfig,
-  CompressionModification,
+  ToolOutputPolicy,
+  ToolOutputTruncationEvent,
 } from "./types.js";
 
-interface RuleBasedOptions {
+interface ToolPolicyOptions {
   estimator: TokenEstimator;
   toolOutput: Required<Pick<ToolOutputConfig, "defaultPolicy" | "maxTokens" | "recentFullCount">> & {
-    toolOverrides: Record<string, string>;
+    toolOverrides: Record<string, ToolOutputPolicy>;
   };
+  onToolOutputTruncated?: (
+    event: ToolOutputTruncationEvent
+  ) => string | undefined | void | Promise<string | undefined | void>;
 }
 
-interface RuleBasedResult {
-  messages: LanguageModelV3Message[];
+interface ToolPolicyResult {
+  messages: ContextMessage[];
   modifications: CompressionModification[];
   tokenEstimate: number;
 }
 
-/**
- * Resolve the tool name for a tool-result message by searching backward
- * for the matching tool-call.
- */
-function resolveToolName(
-  messages: LanguageModelV3Message[],
-  toolResultIndex: number,
-  toolCallId: string
-): string | undefined {
-  for (let i = toolResultIndex - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== "assistant") continue;
-    const parts = (msg as any).content;
-    if (!Array.isArray(parts)) continue;
-    for (const part of parts) {
-      if (part.type === "tool-call" && part.toolCallId === toolCallId) {
-        return part.toolName;
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
- * Count tool-result messages from the end of the array.
- */
-function countToolResultsFromEnd(messages: LanguageModelV3Message[]): Map<number, number> {
+function countToolResultsFromEnd(messages: ContextMessage[]): Map<number, number> {
   const positions = new Map<number, number>();
   let toolCount = 0;
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "tool") {
+    if (messages[i].entryType === "tool-result") {
       positions.set(i, toolCount);
       toolCount++;
     }
@@ -58,142 +37,124 @@ function countToolResultsFromEnd(messages: LanguageModelV3Message[]): Map<number
   return positions;
 }
 
-/**
- * Truncate text to approximately maxTokens worth of characters.
- */
-function truncateText(text: string, maxTokens: number, charsPerToken = 4): string {
-  const maxChars = maxTokens * charsPerToken;
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + "\n[...truncated]";
+function resolveToolName(
+  messages: ContextMessage[],
+  toolResultIndex: number,
+  toolCallId: string | undefined
+): string | undefined {
+  if (!toolCallId) {
+    return messages[toolResultIndex].toolName;
+  }
+
+  for (let i = toolResultIndex - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.entryType === "tool-call" && message.toolCallId === toolCallId) {
+      return message.toolName;
+    }
+  }
+
+  return messages[toolResultIndex].toolName;
 }
 
-/**
- * Apply rule-based compression to messages.
- *
- * Strategies:
- * 1. Tool output decay: Older tool results are truncated/removed more aggressively
- * 2. Per-tool policy overrides: Specific tools can have custom handling
- * 3. Message removal: In extreme cases, old messages are dropped
- */
-export function applyRuleBasedCompression(
-  messages: LanguageModelV3Message[],
-  options: RuleBasedOptions
-): RuleBasedResult {
-  const { estimator, toolOutput } = options;
+function truncateText(text: string, maxTokens: number, charsPerToken = 4): string {
+  const maxChars = maxTokens * charsPerToken;
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, maxChars)}\n[...truncated]`;
+}
+
+export async function applyToolOutputPolicy(
+  messages: ContextMessage[],
+  options: ToolPolicyOptions
+): Promise<ToolPolicyResult> {
+  const { estimator, toolOutput, onToolOutputTruncated } = options;
   const modifications: CompressionModification[] = [];
-  const result: LanguageModelV3Message[] = [];
+  const result: ContextMessage[] = [];
   const toolPositions = countToolResultsFromEnd(messages);
 
   for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
+    const message = messages[i];
 
-    // Only compress tool-result messages
-    if (msg.role !== "tool") {
-      result.push(msg);
+    if (message.entryType !== "tool-result") {
+      result.push(message);
       continue;
     }
 
-    const parts = (msg as any).content;
-    if (!Array.isArray(parts) || parts.length === 0) {
-      result.push(msg);
-      continue;
-    }
-
-    const toolResultPart = parts[0];
-    const toolCallId = toolResultPart?.toolCallId || "";
-    const toolName = toolResultPart?.toolName || resolveToolName(messages, i, toolCallId);
-
-    // Determine policy for this tool
-    let policy = toolOutput.defaultPolicy;
-    if (toolName && toolOutput.toolOverrides[toolName]) {
-      policy = toolOutput.toolOverrides[toolName] as typeof policy;
-    }
-
-    // Check if this tool result is recent enough to keep at full fidelity
+    const toolName = resolveToolName(messages, i, message.toolCallId) ?? "unknown";
+    const policy = toolOutput.toolOverrides[toolName] ?? toolOutput.defaultPolicy;
     const positionFromEnd = toolPositions.get(i) ?? Infinity;
+
     if (positionFromEnd < toolOutput.recentFullCount && policy !== "remove") {
-      result.push(msg);
+      result.push(message);
       continue;
     }
 
-    const originalTokens = estimator.estimateMessage(msg);
+    const originalTokens = estimator.estimateMessage(message);
+    const originalText = message.content;
 
-    // Extract original text for hook callback
-    // Handle both LanguageModelV3 format (content: [{type:"text",text:"..."}])
-    // and CoreMessage format (result: "...")
-    let originalText = "";
-    if (typeof toolResultPart?.result === "string") {
-      originalText = toolResultPart.result;
-    } else if (Array.isArray(toolResultPart?.content)) {
-      originalText = toolResultPart.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("\n");
-    } else if (typeof toolResultPart?.content === "string") {
-      originalText = toolResultPart.content;
+    if (policy === "keep") {
+      result.push(message);
+      continue;
     }
+
+    const event: ToolOutputTruncationEvent = {
+      toolName,
+      toolCallId: message.toolCallId,
+      messageIndex: i,
+      originalOutput: originalText,
+      originalTokens,
+      removed: policy === "remove",
+    };
+
+    const overrideText = onToolOutputTruncated ? await onToolOutputTruncated(event) : undefined;
 
     if (policy === "remove") {
-      // Replace with brief placeholder
-      const removedMsg: LanguageModelV3Message = {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId,
-            toolName: toolName || "unknown",
-            content: [{ type: "text", text: "[Tool output removed for brevity]" }],
-          },
-        ],
-      } as any;
-
-      result.push(removedMsg);
-      const compressedTokens = estimator.estimateMessage(removedMsg);
-
+      const removedMessage: ContextMessage = {
+        ...message,
+        toolName,
+        content: typeof overrideText === "string" && overrideText.length > 0
+          ? overrideText
+          : "[Tool output removed for brevity]",
+      };
+      result.push(removedMessage);
       modifications.push({
         type: "tool-output-removed",
         messageIndex: i,
         originalTokens,
-        compressedTokens,
+        compressedTokens: estimator.estimateMessage(removedMessage),
         toolName,
-        toolCallId,
+        toolCallId: message.toolCallId,
         originalText,
       });
-    } else if (policy === "truncate") {
-      const truncated = truncateText(originalText, toolOutput.maxTokens);
-
-      if (truncated !== originalText) {
-        const truncatedMsg: LanguageModelV3Message = {
-          role: "tool",
-          content: [
-            {
-              type: "tool-result",
-              toolCallId,
-              toolName: toolName || "unknown",
-              content: [{ type: "text", text: truncated }],
-            },
-          ],
-        } as any;
-
-        result.push(truncatedMsg);
-        const compressedTokens = estimator.estimateMessage(truncatedMsg);
-
-        modifications.push({
-          type: "tool-output-truncated",
-          messageIndex: i,
-          originalTokens,
-          compressedTokens,
-          toolName,
-          toolCallId,
-          originalText,
-        });
-      } else {
-        result.push(msg);
-      }
-    } else {
-      // "keep" — no compression
-      result.push(msg);
+      continue;
     }
+
+    const truncatedText = typeof overrideText === "string" && overrideText.length > 0
+      ? overrideText
+      : truncateText(originalText, toolOutput.maxTokens);
+
+    if (truncatedText === originalText) {
+      result.push(message);
+      continue;
+    }
+
+    const truncatedMessage: ContextMessage = {
+      ...message,
+      toolName,
+      content: truncatedText,
+    };
+    result.push(truncatedMessage);
+    modifications.push({
+      type: "tool-output-truncated",
+      messageIndex: i,
+      originalTokens,
+      compressedTokens: estimator.estimateMessage(truncatedMessage),
+      toolName,
+      toolCallId: message.toolCallId,
+      originalText,
+    });
   }
 
   return {

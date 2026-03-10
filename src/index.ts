@@ -1,18 +1,40 @@
-export { contextManagement } from "./middleware.js";
+export { manageContext } from "./manage-context.js";
+export { createContextManagementMiddleware, contextManagement } from "./middleware.js";
+export { createTranscript, defaultTranscriptRenderer } from "./transcript.js";
+export { applySegments, validateSegments, buildSummaryMessage } from "./segments.js";
+export { createSegmentGenerator } from "./segment-generator.js";
+export { applyToolOutputPolicy } from "./rule-based-compressor.js";
+export { normalizeMessages, promptToContextMessages, contextMessagesToPrompt } from "./messages.js";
 export { createDefaultEstimator } from "./token-estimator.js";
-export { createLLMCompressor } from "./llm-compressor.js";
-export { createCompressionCache, hashMessages } from "./cache.js";
+export { createCompressionCache, hashMessages, hashValue } from "./cache.js";
 
 export type {
-  ContextManagementConfig,
-  TokenEstimator,
-  LLMCompressor,
   CompressionCache,
-  CompressionResult,
-  CompressionTier,
   CompressionModification,
+  CompressionSegment,
+  ContextDebugInfo,
+  ContextEntryType,
+  ContextManagementConfig,
+  ContextManagementMiddleware,
+  ContextMessage,
+  ContextMessageInput,
+  ContextRole,
+  ManageContextConfig,
+  ManageContextResult,
+  ManageContextStats,
+  MiddlewareContext,
+  SegmentGenerationInput,
+  SegmentGenerator,
+  SegmentStore,
+  SegmentValidationOptions,
+  TokenEstimator,
   ToolOutputConfig,
   ToolOutputPolicy,
   ToolOutputTruncationEvent,
-  ContextDebugInfo,
+  TranscriptRenderOptions,
+  TranscriptRenderResult,
+  TranscriptRenderer,
+  ValidationResult,
 } from "./types.js";
+
+export type { CreateSegmentGeneratorConfig } from "./segment-generator.js";
