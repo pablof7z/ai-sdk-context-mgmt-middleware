@@ -1,4 +1,4 @@
-# @tenex/context-mgmt
+# ai-sdk-context-mgmt-middleware
 
 AI SDK v6 middleware for intelligent context window management. Automatically compresses conversation history to fit within token limits using a two-tier pipeline.
 
@@ -14,13 +14,13 @@ The middleware tracks token usage and only activates when the estimated token co
 ## Installation
 
 ```bash
-npm install @tenex/context-mgmt
+npm install ai-sdk-context-mgmt-middleware
 ```
 
 ## Quick Start
 
 ```typescript
-import { contextManagement } from "@tenex/context-mgmt";
+import { contextManagement } from "ai-sdk-context-mgmt-middleware";
 import { wrapLanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 
@@ -84,7 +84,7 @@ const middleware = contextManagement({
 For deeper compression, provide an LLM compressor:
 
 ```typescript
-import { createLLMCompressor } from "@tenex/context-mgmt";
+import { createLLMCompressor } from "ai-sdk-context-mgmt-middleware";
 import { openai } from "@ai-sdk/openai";
 
 const middleware = contextManagement({
@@ -101,7 +101,7 @@ const middleware = contextManagement({
 Avoid re-compressing the same messages:
 
 ```typescript
-import { createCompressionCache } from "@tenex/context-mgmt";
+import { createCompressionCache } from "ai-sdk-context-mgmt-middleware";
 
 const middleware = contextManagement({
   maxTokens: 128_000,

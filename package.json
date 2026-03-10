@@ -1,5 +1,5 @@
 {
-  "name": "ai-sdk-context-mgmt",
+  "name": "ai-sdk-context-mgmt-middleware",
   "version": "0.1.0",
   "description": "AI SDK v6 middleware for context window management with two-tier compression",
   "type": "module",
@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pablof7z/ai-sdk-context-mgmt.git"
+    "url": "git+https://github.com/pablof7z/ai-sdk-context-mgmt-middleware.git"
   },
   "peerDependencies": {
     "@ai-sdk/provider": ">=1.0.0"
