@@ -56,17 +56,17 @@ function extractToolResultIds(message: LanguageModelV3Message): string[] {
     .map((part: any) => part.toolCallId);
 }
 
-function adjustTailSplitForToolAdjacency(
+function adjustSplitIndexForToolAdjacency(
   messages: LanguageModelV3Message[],
-  requestedTailCount: number
+  splitIndex: number
 ): number {
-  let splitIndex = Math.max(messages.length - requestedTailCount, 0);
+  let adjustedSplitIndex = splitIndex;
 
-  while (splitIndex > 0) {
+  while (adjustedSplitIndex > 0) {
     const toolCallsInTail = new Set<string>();
     const toolResultsInTail = new Set<string>();
 
-    for (let i = splitIndex; i < messages.length; i++) {
+    for (let i = adjustedSplitIndex; i < messages.length; i++) {
       for (const toolCallId of extractToolCallIds(messages[i])) {
         toolCallsInTail.add(toolCallId);
       }
@@ -83,10 +83,92 @@ function adjustTailSplitForToolAdjacency(
       break;
     }
 
-    splitIndex--;
+    adjustedSplitIndex--;
   }
 
-  return splitIndex;
+  return adjustedSplitIndex;
+}
+
+function adjustTailSplitForToolAdjacency(
+  messages: LanguageModelV3Message[],
+  requestedTailCount: number
+): number {
+  const splitIndex = Math.max(messages.length - requestedTailCount, 0);
+  return adjustSplitIndexForToolAdjacency(messages, splitIndex);
+}
+
+function createFallbackNotice(): LanguageModelV3Message {
+  return {
+    role: "user",
+    content: [{
+      type: "text",
+      text: "[Earlier conversation truncated to fit token budget]",
+    }],
+  };
+}
+
+function selectFittingConversationTail(
+  messages: LanguageModelV3Message[],
+  availableTokens: number,
+  estimator: TokenEstimator
+): LanguageModelV3Message[] {
+  if (availableTokens <= 0 || messages.length === 0) {
+    return [];
+  }
+
+  let bestStartIndex = messages.length;
+
+  for (let i = messages.length; i >= 0; i--) {
+    const candidateStartIndex = adjustSplitIndexForToolAdjacency(messages, i);
+    const candidateMessages = messages.slice(candidateStartIndex);
+    const candidateTokens = estimator.estimateMessages(candidateMessages);
+
+    if (candidateTokens <= availableTokens) {
+      bestStartIndex = candidateStartIndex;
+    }
+  }
+
+  return messages.slice(bestStartIndex);
+}
+
+function enforceTokenBudget(
+  systemMessages: LanguageModelV3Message[],
+  conversationMessages: LanguageModelV3Message[],
+  maxTokens: number,
+  estimator: TokenEstimator
+): LanguageModelV3Message[] {
+  const systemTokens = estimator.estimateMessages(systemMessages);
+  const availableConversationTokens = maxTokens - systemTokens;
+
+  if (availableConversationTokens <= 0) {
+    return systemMessages;
+  }
+
+  let fittedConversation = selectFittingConversationTail(
+    conversationMessages,
+    availableConversationTokens,
+    estimator
+  );
+
+  const truncated = fittedConversation.length < conversationMessages.length;
+  if (!truncated) {
+    return [...systemMessages, ...fittedConversation];
+  }
+
+  const notice = createFallbackNotice();
+  const noticeTokens = estimator.estimateMessage(notice);
+
+  if (noticeTokens <= availableConversationTokens) {
+    const budgetAfterNotice = availableConversationTokens - noticeTokens;
+    fittedConversation = selectFittingConversationTail(
+      conversationMessages,
+      budgetAfterNotice,
+      estimator
+    );
+    return [...systemMessages, notice, ...fittedConversation];
+  }
+
+  return [...systemMessages, ...fittedConversation];
 }
 
 /**
@@ -297,7 +379,31 @@ export function contextManagement(config: ContextManagementConfig): LanguageMode
       }
 
       // Reassemble: system + compressed body + protected tail
-      const finalPrompt = [...systemMessages, ...compressed, ...protectedTail];
+      let finalPrompt = [...systemMessages, ...compressed, ...protectedTail];
+      const finalTokenEstimate = estimator.estimateMessages(finalPrompt);
+
+      if (finalTokenEstimate > maxTokens) {
+        const budgetEnforcedPrompt = enforceTokenBudget(
+          systemMessages,
+          [...compressed, ...protectedTail],
+          maxTokens,
+          estimator
+        );
+
+        const enforcedTokens = estimator.estimateMessages(budgetEnforcedPrompt);
+        if (enforcedTokens < finalTokenEstimate) {
+          modifications.push({
+            type: "message-removed",
+            messageIndex: 0,
+            originalTokens: finalTokenEstimate,
+            compressedTokens: enforcedTokens,
+          });
+          finalPrompt = budgetEnforcedPrompt;
+          if (tier === "none") {
+            tier = "rule-based";
+          }
+        }
+      }
 
       // Cache the result
       const result: CompressionResult = {
