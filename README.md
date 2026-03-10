@@ -18,6 +18,37 @@ Output on each turn:
 
 The full conversation remains the source of truth. The package does not own conversation storage.
 
+## High-Level Flow
+
+```mermaid
+flowchart TD
+    A["Host Provides Full messages[]"] --> B["Normalize Into Addressable Entries"]
+    S["SegmentStore.load(conversationKey)"] --> C["Reapply Existing Segments"]
+    B --> T["Always Apply toolPolicy(context)"]
+    T --> C
+    C --> D{"Over Compression Threshold?"}
+    D -- "No" --> F["Return Rewritten messages[]"]
+    D -- "Yes" --> E["Render Candidate Range As Transcript"]
+    E --> G["SegmentGenerator Produces 1..N Segments"]
+    G --> H["Validate And Apply New Segments"]
+    H --> I{"Fits maxTokens?"}
+    C --> I
+    I -- "No" --> J["Hard Budget Fallback Trims Older History"]
+    I -- "Yes" --> F
+    J --> F
+    F --> K["SegmentStore.save/append(new or applied segments)"]
+
+    classDef host fill:#f4f0e8,stroke:#8a6d3b,color:#2d2418
+    classDef engine fill:#e6f4ea,stroke:#2f6b3d,color:#12311c
+    classDef llm fill:#e7eefc,stroke:#355caa,color:#10254d
+    classDef store fill:#fff3cd,stroke:#8a6d3b,color:#4a3a00
+
+    class A,F,K host
+    class B,T,C,D,H,I,J engine
+    class E,G llm
+    class S store
+```
+
 ## What It Does
 
 On each turn the engine:
