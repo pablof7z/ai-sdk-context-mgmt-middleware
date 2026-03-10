@@ -5,11 +5,10 @@ import type {
   ManageContextConfig,
   ManageContextResult,
   TokenEstimator,
-  ToolOutputConfig,
 } from "./types.js";
 import { createDefaultEstimator } from "./token-estimator.js";
 import { normalizeMessages } from "./messages.js";
-import { applyToolOutputPolicy } from "./rule-based-compressor.js";
+import { applyToolPolicy } from "./rule-based-compressor.js";
 import { applySegments, buildSummaryMessage, validateSegments } from "./segments.js";
 import { createTranscript } from "./transcript.js";
 
@@ -20,19 +19,6 @@ interface CompressionCandidate {
   messages: ContextMessage[];
   rangeStart: number;
   rangeEnd: number;
-}
-
-function normalizeToolOutputConfig(
-  toolOutput?: ToolOutputConfig
-): Required<Pick<ToolOutputConfig, "defaultPolicy" | "maxTokens" | "recentFullCount">> & {
-  toolOverrides: Record<string, "keep" | "truncate" | "remove">;
-} {
-  return {
-    defaultPolicy: toolOutput?.defaultPolicy ?? "truncate",
-    maxTokens: toolOutput?.maxTokens ?? 200,
-    recentFullCount: toolOutput?.recentFullCount ?? 2,
-    toolOverrides: toolOutput?.toolOverrides ?? {},
-  };
 }
 
 function extractToolCallIds(message: ContextMessage): string[] {
@@ -254,9 +240,12 @@ export async function manageContext(config: ManageContextConfig): Promise<Manage
   const normalizedMessages = normalizeMessages(config.messages);
   const originalTokenEstimate = estimator.estimateMessages(normalizedMessages);
 
-  const toolPolicyResult = await applyToolOutputPolicy(normalizedMessages, {
+  const toolPolicyResult = await applyToolPolicy(normalizedMessages, {
     estimator,
-    toolOutput: normalizeToolOutputConfig(config.toolOutput),
+    currentTokenEstimate: originalTokenEstimate,
+    maxContextTokens: config.maxTokens,
+    toolPolicy: config.toolPolicy,
+    onToolContentTruncated: config.onToolContentTruncated,
     onToolOutputTruncated: config.onToolOutputTruncated,
   });
 

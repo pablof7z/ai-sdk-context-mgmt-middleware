@@ -125,14 +125,14 @@ describe("createContextManagementMiddleware", () => {
     const prompt: LanguageModelV3Message[] = [
       {
         role: "assistant",
-        content: [{ type: "tool-call", toolCallId: "c1", toolName: "search", input: { q: "x" } }],
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "fs_read", input: { q: "x" } }],
       },
       {
         role: "tool",
         content: [{
           type: "tool-result",
           toolCallId: "c1",
-          toolName: "search",
+          toolName: "fs_read",
           output: { type: "text", value: "y".repeat(800) },
         }],
       },
@@ -142,22 +142,14 @@ describe("createContextManagementMiddleware", () => {
       maxTokens: 5_000,
       compressionThreshold: 1,
       cache,
-      toolOutput: {
-        defaultPolicy: "remove",
-        recentFullCount: 0,
-        maxTokens: 10,
-      },
+      toolPolicy: () => ({ result: { policy: "remove" } }),
     });
 
     const relaxedMiddleware = createContextManagementMiddleware({
       maxTokens: 5_000,
       compressionThreshold: 1,
       cache,
-      toolOutput: {
-        defaultPolicy: "keep",
-        recentFullCount: 10,
-        maxTokens: 1_000,
-      },
+      toolPolicy: () => ({ result: { policy: "keep" } }),
     });
 
     const strictResult = await strictMiddleware.transformParams?.({

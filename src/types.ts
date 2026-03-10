@@ -2,6 +2,8 @@ import type { LanguageModelV3Message, LanguageModelV3Middleware } from "@ai-sdk/
 
 export type ContextRole = "system" | "user" | "assistant" | "tool";
 export type ContextEntryType = "text" | "tool-call" | "tool-result" | "summary";
+export type ToolEntryType = "tool-call" | "tool-result";
+export type ToolOutputPolicy = "keep" | "truncate" | "remove";
 
 export interface ContextMessageInput {
   id?: string;
@@ -56,26 +58,58 @@ export interface CompressionCache<T = ManageContextResult> {
   readonly size: number;
 }
 
-export type ToolOutputPolicy = "keep" | "truncate" | "remove";
-
-export interface ToolOutputConfig {
-  defaultPolicy?: ToolOutputPolicy;
-  maxTokens?: number;
-  recentFullCount?: number;
-  toolOverrides?: Record<string, ToolOutputPolicy>;
+export interface ToolPolicyEntryContext {
+  message: ContextMessage;
+  messageIndex: number;
+  positionFromEnd: number;
+  tokens: number;
+  content: string;
 }
 
-export interface ToolOutputTruncationEvent {
+export interface ToolEntryPolicyDecision {
+  policy: ToolOutputPolicy;
+  maxTokens?: number;
+}
+
+export interface ToolPolicyDecision {
+  call?: ToolEntryPolicyDecision;
+  result?: ToolEntryPolicyDecision;
+}
+
+export interface ToolPolicyContext {
+  toolName: string;
+  toolCallId?: string;
+  call?: ToolPolicyEntryContext;
+  result?: ToolPolicyEntryContext;
+  exchangePositionFromEnd: number;
+  combinedTokens: number;
+  currentTokenEstimate: number;
+  maxContextTokens: number;
+  messages: readonly ContextMessage[];
+}
+
+export type ToolPolicy = (
+  context: ToolPolicyContext
+) => ToolPolicyDecision | Promise<ToolPolicyDecision>;
+
+export interface ToolContentTruncationEvent {
+  entryType: ToolEntryType;
   toolName: string;
   toolCallId?: string;
   messageIndex: number;
-  originalOutput: string;
+  originalContent: string;
   originalTokens: number;
   removed: boolean;
 }
 
 export interface CompressionModification {
-  type: "tool-output-truncated" | "tool-output-removed" | "message-removed" | "conversation-summarized";
+  type:
+    | "tool-call-truncated"
+    | "tool-call-removed"
+    | "tool-result-truncated"
+    | "tool-result-removed"
+    | "message-removed"
+    | "conversation-summarized";
   messageIndex: number;
   originalTokens: number;
   compressedTokens: number;
@@ -128,9 +162,12 @@ export interface ManageContextConfig {
   segmentGenerator?: SegmentGenerator;
   transcriptRenderer?: TranscriptRenderer;
   existingSegments?: CompressionSegment[];
-  toolOutput?: ToolOutputConfig;
+  toolPolicy?: ToolPolicy;
+  onToolContentTruncated?: (
+    event: ToolContentTruncationEvent
+  ) => string | undefined | void | Promise<string | undefined | void>;
   onToolOutputTruncated?: (
-    event: ToolOutputTruncationEvent
+    event: ToolContentTruncationEvent
   ) => string | undefined | void | Promise<string | undefined | void>;
 }
 
@@ -171,10 +208,13 @@ export interface ContextManagementConfig {
   segmentStore?: SegmentStore;
   resolveConversationKey?: (context: MiddlewareContext) => string;
   cache?: CompressionCache<ManageContextResult>;
-  toolOutput?: ToolOutputConfig;
+  toolPolicy?: ToolPolicy;
   onDebug?: (info: ContextDebugInfo) => void;
+  onToolContentTruncated?: (
+    event: ToolContentTruncationEvent
+  ) => string | undefined | void | Promise<string | undefined | void>;
   onToolOutputTruncated?: (
-    event: ToolOutputTruncationEvent
+    event: ToolContentTruncationEvent
   ) => string | undefined | void | Promise<string | undefined | void>;
 }
 

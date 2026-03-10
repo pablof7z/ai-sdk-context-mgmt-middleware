@@ -39,6 +39,30 @@ describe("normalizeMessages", () => {
 });
 
 describe("contextMessagesToPrompt", () => {
+  test("rebuilds modified tool calls as AI SDK tool-call messages", () => {
+    const prompt: LanguageModelV3Message[] = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call-1", toolName: "fs_write", input: { path: "/tmp/file", content: "abc" } }],
+      },
+    ];
+
+    const messages = promptToContextMessages(prompt);
+    messages[0] = {
+      ...messages[0],
+      content: "[Tool call input removed for brevity]",
+    };
+
+    const rebuiltPrompt = contextMessagesToPrompt(messages);
+    const toolCallMessage = rebuiltPrompt[0];
+
+    expect(toolCallMessage.role).toBe("assistant");
+    expect((toolCallMessage.content[0] as any).type).toBe("tool-call");
+    expect((toolCallMessage.content[0] as any).input).toEqual({
+      _contextManagementInput: "[Tool call input removed for brevity]",
+    });
+  });
+
   test("rebuilds modified tool results as AI SDK tool messages", () => {
     const prompt: LanguageModelV3Message[] = [
       {

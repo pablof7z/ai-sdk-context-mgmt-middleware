@@ -30,20 +30,21 @@ async function main() {
     resolveConversationKey({ params }) {
       return (params.providerOptions as any).contextManagement.conversationId;
     },
-    toolOutput: {
-      defaultPolicy: "truncate",
-      maxTokens: 30,
-      recentFullCount: 1,
-      toolOverrides: {
-        logs: "remove",
-        important_data: "keep",
-      },
-    },
-    onToolOutputTruncated: async (event) => {
-      const storageId = `store_${event.toolName}_${event.toolCallId}`;
-      externalStore.set(storageId, event.originalOutput);
+    toolPolicy: ({ toolName, call, result, exchangePositionFromEnd }) => ({
+      call: call && call.tokens > 80 ? { policy: "truncate", maxTokens: exchangePositionFromEnd === 0 ? 64 : 32 } : undefined,
+      result: toolName === "important_data"
+        ? { policy: "keep" }
+        : toolName === "logs"
+          ? { policy: "remove" }
+          : result && result.tokens > 120
+            ? { policy: "truncate", maxTokens: exchangePositionFromEnd === 0 ? 80 : 40 }
+            : undefined,
+    }),
+    onToolContentTruncated: async (event) => {
+      const storageId = `store_${event.entryType}_${event.toolName}_${event.toolCallId}`;
+      externalStore.set(storageId, event.originalContent);
       if (event.removed) {
-        return `[Tool output removed. Retrieve with externalStore.get("${storageId}")]`;
+        return `[Content removed. Retrieve with externalStore.get("${storageId}")]`;
       }
       return undefined;
     },

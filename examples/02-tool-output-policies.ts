@@ -1,38 +1,40 @@
 /**
- * Example 02: Always-on tool output policy.
+ * Example 02: Always-on tool policy.
  *
- * Demonstrates that tool-result truncation/removal runs even when the
+ * Demonstrates that tool-call and tool-result compression runs even when the
  * conversation is still below the segment-compression threshold.
  */
 import { createContextManagementMiddleware } from "ai-sdk-context-mgmt-middleware";
 import { generateConversation, generateToolExchange, getTextContent, printPrompt, runMiddlewareTransform } from "./helpers.js";
 
 async function main() {
-  console.log("=== Example 02: Tool output policies ===\n");
+  console.log("=== Example 02: Tool policy ===\n");
 
-  const truncatedOutputs: Array<{ toolName: string; removed: boolean; originalTokens: number }> = [];
+  const truncatedEntries: Array<{ toolName: string; entryType: string; removed: boolean; originalTokens: number }> = [];
 
   const middleware = createContextManagementMiddleware({
     maxTokens: 20_000,
     compressionThreshold: 0.95,
-    toolOutput: {
-      defaultPolicy: "truncate",
-      maxTokens: 40,
-      recentFullCount: 0,
-      toolOverrides: {
-        debug_logs: "remove",
-        important_data: "keep",
-      },
-    },
-    onToolOutputTruncated: async (event) => {
-      truncatedOutputs.push({
+    toolPolicy: ({ toolName, call, result }) => ({
+      call: toolName === "debug_logs"
+        ? { policy: "remove" }
+        : (call && call.tokens > 60 ? { policy: "truncate", maxTokens: 24 } : undefined),
+      result: toolName === "important_data"
+        ? { policy: "keep" }
+        : toolName === "debug_logs"
+          ? { policy: "remove" }
+          : (result && result.tokens > 100 ? { policy: "truncate", maxTokens: 40 } : undefined),
+    }),
+    onToolContentTruncated: async (event) => {
+      truncatedEntries.push({
         toolName: event.toolName,
+        entryType: event.entryType,
         removed: event.removed,
         originalTokens: event.originalTokens,
       });
 
       if (event.removed) {
-        return `[Output stored externally for ${event.toolName}:${event.toolCallId}]`;
+        return `[Content stored externally for ${event.entryType}:${event.toolName}:${event.toolCallId}]`;
       }
 
       return undefined;
@@ -58,13 +60,18 @@ async function main() {
   printPrompt("output", output);
 
   console.log("\ntruncation events:");
-  for (const event of truncatedOutputs) {
-    console.log(`  ${event.toolName}: ${event.removed ? "removed" : "truncated"} (${event.originalTokens} tokens)`);
+  for (const event of truncatedEntries) {
+    console.log(
+      `  ${event.toolName}/${event.entryType}: ${event.removed ? "removed" : "truncated"} ` +
+      `(${event.originalTokens} tokens)`
+    );
   }
 
-  console.log("\nfinal tool outputs:");
-  for (const message of output.filter((message) => message.role === "tool")) {
-    console.log(`  ${getTextContent(message).slice(0, 120)}${getTextContent(message).length > 120 ? "..." : ""}`);
+  console.log("\nfinal tool messages:");
+  for (const message of output.filter((message) => message.role === "assistant" || message.role === "tool")) {
+    if (message.role === "assistant" || message.role === "tool") {
+      console.log(`  ${message.role}: ${getTextContent(message).slice(0, 120)}${getTextContent(message).length > 120 ? "..." : ""}`);
+    }
   }
 }
 

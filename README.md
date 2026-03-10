@@ -6,11 +6,23 @@ The package has two layers:
 - a pure context engine that works on normalized transcript entries
 - a thin AI SDK middleware adapter that rewrites the outgoing prompt and persists summary segments through a host-owned store
 
+## Mental Model
+
+Input on each turn:
+- the full current `messages[]`
+- any previously persisted compression segments for the conversation
+
+Output on each turn:
+- a rewritten `messages[]` array ready for the provider call
+- any newly generated segments that the host should persist for the next turn
+
+The full conversation remains the source of truth. The package does not own conversation storage.
+
 ## What It Does
 
 On each turn the engine:
 1. normalizes the full `messages[]` array into addressable entries
-2. always applies tool output truncation/removal rules
+2. always applies `toolPolicy(context)` to tool calls and tool results
 3. reapplies any previously persisted summary segments
 4. checks the token budget after those transforms
 5. if still above the compression threshold, renders the newest unsummarized block before the protected tail into a transcript and asks an LLM for 1 or more replacement segments
@@ -28,7 +40,11 @@ npm install ai-sdk-context-mgmt-middleware
 ## Pure Engine
 
 ```ts
-import { manageContext, createSegmentGenerator } from "ai-sdk-context-mgmt-middleware";
+import {
+  createSegmentGenerator,
+  defaultToolPolicy,
+  manageContext,
+} from "ai-sdk-context-mgmt-middleware";
 
 const segmentGenerator = createSegmentGenerator({
   async generate(prompt) {
@@ -43,15 +59,15 @@ const result = await manageContext({
   protectedTailCount: 4,
   existingSegments: persistedSegments,
   segmentGenerator,
-  toolOutput: {
-    defaultPolicy: "truncate",
-    maxTokens: 300,
-    recentFullCount: 2,
-    toolOverrides: {
-      fs_read: "truncate",
-      debug_logs: "remove",
-      final_report: "keep",
-    },
+  toolPolicy: (context) => {
+    const base = defaultToolPolicy(context);
+    if (context.toolName === "important_data") {
+      return {
+        ...base,
+        result: { policy: "keep" },
+      };
+    }
+    return base;
   },
 });
 
@@ -69,6 +85,7 @@ import {
   createCompressionCache,
   createContextManagementMiddleware,
   createSegmentGenerator,
+  defaultToolPolicy,
 } from "ai-sdk-context-mgmt-middleware";
 
 const segmentStore = new Map<string, any[]>();
@@ -92,10 +109,15 @@ const middleware = createContextManagementMiddleware({
       return await cheapModel(prompt);
     },
   }),
-  toolOutput: {
-    defaultPolicy: "truncate",
-    maxTokens: 300,
-    recentFullCount: 2,
+  toolPolicy: (context) => {
+    const base = defaultToolPolicy(context);
+    if (context.toolName === "logs") {
+      return {
+        ...base,
+        result: { policy: "remove" },
+      };
+    }
+    return base;
   },
 });
 
@@ -106,6 +128,44 @@ const model = wrapLanguageModel({
 ```
 
 `createContextManagementMiddleware` is also exported as `contextManagement`.
+
+## Tool Policy
+
+`toolPolicy(context)` is always applied, even when the conversation is still below the segment-compression threshold.
+
+The policy receives both sides of the exchange:
+- `context.call`
+- `context.result`
+- `context.exchangePositionFromEnd`
+- `context.combinedTokens`
+- `context.currentTokenEstimate`
+- `context.maxContextTokens`
+
+This lets one policy account for tools whose token cost lives mostly in the call input (`fs_write`) as well as tools whose cost lives mostly in the result (`fs_read`).
+
+The function returns per-entry decisions:
+
+```ts
+{
+  call?: { policy: "keep" | "truncate" | "remove", maxTokens?: number },
+  result?: { policy: "keep" | "truncate" | "remove", maxTokens?: number },
+}
+```
+
+If you do not provide a policy, the package uses `defaultToolPolicy(context)`, which applies a depth-and-size heuristic to both tool calls and tool results.
+
+### Tool Content Hook
+
+Use `onToolContentTruncated(event)` to store removed or truncated tool content externally and optionally replace it with retrieval text:
+
+```ts
+onToolContentTruncated: async (event) => {
+  const storageId = await ragStore.save(event.originalContent);
+  return `[Tool content stored externally. Retrieve with rag_get("${storageId}")]`;
+}
+```
+
+`event.entryType` tells you whether the change came from a tool call or a tool result.
 
 ## Transcript Rendering
 
@@ -143,24 +203,6 @@ If you want summary chunks to be reused on the next turn, provide a `SegmentStor
 
 Append-only stores are supported because the engine only creates new segments for the newest unsummarized block before the protected tail.
 
-## Tool Output Policy
-
-Tool output policy is always applied, even when the conversation is still below the LLM compression threshold.
-
-Policies:
-- `keep`
-- `truncate`
-- `remove`
-
-Optional hook:
-
-```ts
-onToolOutputTruncated: async (event) => {
-  const storageId = await ragStore.save(event.originalOutput);
-  return `[Tool output stored externally. Retrieve with rag_get("${storageId}")]`;
-}
-```
-
 ## Hard Budget Fallback
 
 If tool policy plus segment compression still do not fit `maxTokens`, the engine drops older history until the prompt fits and inserts:
@@ -182,6 +224,7 @@ Primary exports:
 - `createSegmentGenerator(config)`
 - `createCompressionCache(options?)`
 - `createDefaultEstimator()`
+- `defaultToolPolicy(context)`
 
 Adapter helpers:
 - `normalizeMessages(messages)`

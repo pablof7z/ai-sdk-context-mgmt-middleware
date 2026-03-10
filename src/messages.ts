@@ -11,6 +11,7 @@ import { hashValue } from "./cache.js";
 const SHORT_ID_LENGTH = 8;
 const ORIGINAL_MESSAGE_KEY = "__originalMessage";
 const ORIGINAL_CONTENT_KEY = "__originalContent";
+const ORIGINAL_TOOL_CALL_INPUT_KEY = "__originalToolCallInput";
 
 function shortHash(value: string): string {
   return hashValue(value).slice(0, SHORT_ID_LENGTH) || "msg";
@@ -73,7 +74,12 @@ function formatToolResultOutput(output: LanguageModelV3ToolResultOutput | unknow
   return JSON.stringify(output);
 }
 
-function extractToolCallText(content: any[]): { content: string; toolCallId?: string; toolName?: string } {
+function extractToolCallText(content: any[]): {
+  content: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+} {
   const toolCallPart = content.find((part): part is LanguageModelV3ToolCallPart => part?.type === "tool-call");
   if (!toolCallPart) {
     return { content: JSON.stringify(content) };
@@ -87,6 +93,7 @@ function extractToolCallText(content: any[]): { content: string; toolCallId?: st
     content: textParts ? `${textParts}\n${callText}` : callText,
     toolCallId: typeof toolCallPart.toolCallId === "string" ? toolCallPart.toolCallId : undefined,
     toolName: typeof toolCallPart.toolName === "string" ? toolCallPart.toolName : undefined,
+    toolInput: input,
   };
 }
 
@@ -174,6 +181,7 @@ export function promptToContextMessages(prompt: LanguageModelV3Message[]): Conte
         metadata: {
           [ORIGINAL_MESSAGE_KEY]: message,
           [ORIGINAL_CONTENT_KEY]: result.content,
+          [ORIGINAL_TOOL_CALL_INPUT_KEY]: result.toolInput,
         },
       };
     }
@@ -208,6 +216,31 @@ function createTextPromptMessage(message: ContextMessage): LanguageModelV3Messag
   } as LanguageModelV3Message;
 }
 
+function createToolCallPromptMessage(message: ContextMessage): LanguageModelV3Message {
+  const originalMessage = message.metadata?.[ORIGINAL_MESSAGE_KEY] as LanguageModelV3Message | undefined;
+  const originalContent = message.metadata?.[ORIGINAL_CONTENT_KEY] as string | undefined;
+  const originalPart = originalMessage?.role === "assistant"
+    ? originalMessage.content.find((part) => part.type === "tool-call")
+    : undefined;
+
+  const input = originalContent === message.content
+    ? message.metadata?.[ORIGINAL_TOOL_CALL_INPUT_KEY] ?? { _contextManagementInput: message.content }
+    : { _contextManagementInput: message.content };
+
+  return {
+    role: "assistant",
+    providerOptions: originalMessage?.providerOptions,
+    content: [{
+      type: "tool-call",
+      toolCallId: message.toolCallId ?? "tool-call",
+      toolName: message.toolName ?? "tool",
+      input,
+      providerExecuted: (originalPart as any)?.providerExecuted,
+      providerOptions: (originalPart as any)?.providerOptions,
+    }],
+  } as LanguageModelV3Message;
+}
+
 function createToolResultPromptMessage(message: ContextMessage): LanguageModelV3Message {
   const originalMessage = message.metadata?.[ORIGINAL_MESSAGE_KEY] as LanguageModelV3Message | undefined;
   const originalPart = originalMessage?.role === "tool" ? originalMessage.content[0] : undefined;
@@ -232,6 +265,10 @@ export function contextMessagesToPrompt(messages: ContextMessage[]): LanguageMod
 
     if (originalMessage && originalContent === message.content && message.entryType !== "summary") {
       return originalMessage;
+    }
+
+    if (message.entryType === "tool-call") {
+      return createToolCallPromptMessage(message);
     }
 
     if (message.entryType === "tool-result") {

@@ -28,12 +28,6 @@ function getObjectIdentity(value: object | undefined): number | undefined {
   return identity;
 }
 
-function sortToolOverrides(toolOverrides: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(toolOverrides).sort(([left], [right]) => left.localeCompare(right))
-  );
-}
-
 function emitDebug(onDebug: ((info: ContextDebugInfo) => void) | undefined, info: ContextDebugInfo): void {
   if (onDebug) {
     onDebug(info);
@@ -45,17 +39,13 @@ function buildCacheScope(config: ContextManagementConfig): Record<string, unknow
     maxTokens: config.maxTokens,
     compressionThreshold: config.compressionThreshold ?? 0.8,
     protectedTailCount: config.protectedTailCount ?? 4,
-    toolOutput: {
-      defaultPolicy: config.toolOutput?.defaultPolicy ?? "truncate",
-      maxTokens: config.toolOutput?.maxTokens ?? 200,
-      recentFullCount: config.toolOutput?.recentFullCount ?? 2,
-      toolOverrides: sortToolOverrides(config.toolOutput?.toolOverrides ?? {}),
-    },
     estimatorId: getObjectIdentity(config.estimator as object | undefined),
+    toolPolicyId: getObjectIdentity(config.toolPolicy as object | undefined),
     segmentGeneratorId: getObjectIdentity(config.segmentGenerator as object | undefined),
     transcriptRendererId: getObjectIdentity(config.transcriptRenderer as object | undefined),
     segmentStoreId: getObjectIdentity(config.segmentStore as object | undefined),
-    truncationHookId: getObjectIdentity(config.onToolOutputTruncated as object | undefined),
+    toolContentHookId: getObjectIdentity(config.onToolContentTruncated as object | undefined),
+    toolOutputHookId: getObjectIdentity(config.onToolOutputTruncated as object | undefined),
   };
 }
 
@@ -160,7 +150,8 @@ export function createContextManagementMiddleware(
         segmentGenerator: config.segmentGenerator,
         transcriptRenderer: config.transcriptRenderer,
         existingSegments,
-        toolOutput: config.toolOutput,
+        toolPolicy: config.toolPolicy,
+        onToolContentTruncated: config.onToolContentTruncated,
         onToolOutputTruncated: config.onToolOutputTruncated,
       });
 

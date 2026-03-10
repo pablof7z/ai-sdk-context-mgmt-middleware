@@ -3,7 +3,7 @@ export { createContextManagementMiddleware, contextManagement } from "./middlewa
 export { createTranscript, defaultTranscriptRenderer } from "./transcript.js";
 export { applySegments, validateSegments, buildSummaryMessage } from "./segments.js";
 export { createSegmentGenerator } from "./segment-generator.js";
-export { applyToolOutputPolicy } from "./rule-based-compressor.js";
+export { applyToolPolicy, applyToolOutputPolicy, defaultToolPolicy } from "./rule-based-compressor.js";
 export { normalizeMessages, promptToContextMessages, contextMessagesToPrompt } from "./messages.js";
 export { createDefaultEstimator } from "./token-estimator.js";
 export { createCompressionCache, hashMessages, hashValue } from "./cache.js";
@@ -28,9 +28,14 @@ export type {
   SegmentStore,
   SegmentValidationOptions,
   TokenEstimator,
-  ToolOutputConfig,
+  ToolContentTruncationEvent,
+  ToolEntryPolicyDecision,
+  ToolEntryType,
   ToolOutputPolicy,
-  ToolOutputTruncationEvent,
+  ToolPolicy,
+  ToolPolicyContext,
+  ToolPolicyDecision,
+  ToolPolicyEntryContext,
   TranscriptRenderOptions,
   TranscriptRenderResult,
   TranscriptRenderer,

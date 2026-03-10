@@ -1,9 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { manageContext } from "../manage-context.js";
-import { createDefaultEstimator } from "../token-estimator.js";
 import type { ContextMessageInput, SegmentGenerator } from "../types.js";
-
-const estimator = createDefaultEstimator();
 
 function makeConversation(): ContextMessageInput[] {
   return [
@@ -15,21 +12,21 @@ function makeConversation(): ContextMessageInput[] {
 }
 
 describe("manageContext", () => {
-  test("applies tool truncation even below the segment-compression threshold", async () => {
+  test("applies custom tool policy even below the segment-compression threshold", async () => {
     const messages: ContextMessageInput[] = [
       {
         role: "assistant",
         entryType: "tool-call",
         toolCallId: "call-1",
-        toolName: "fs_read",
-        content: 'fs_read({"path":"/tmp/file"})',
+        toolName: "fs_write",
+        content: `fs_write(${JSON.stringify({ path: "/tmp/file", content: "x".repeat(400) })})`,
       },
       {
         role: "tool",
         entryType: "tool-result",
         toolCallId: "call-1",
-        toolName: "fs_read",
-        content: "x".repeat(500),
+        toolName: "fs_write",
+        content: "ok",
       },
       { role: "user", content: "Continue" },
     ];
@@ -38,16 +35,14 @@ describe("manageContext", () => {
       messages,
       maxTokens: 5_000,
       compressionThreshold: 0.95,
-      toolOutput: {
-        defaultPolicy: "truncate",
-        maxTokens: 20,
-        recentFullCount: 0,
-      },
+      toolPolicy: ({ call }) => ({
+        call: call && call.tokens > 50 ? { policy: "truncate", maxTokens: 24 } : undefined,
+      }),
     });
 
     expect(result.newSegments).toHaveLength(0);
-    expect(result.modifications.some((modification) => modification.type === "tool-output-truncated")).toBe(true);
-    expect(result.messages.find((message) => message.entryType === "tool-result")?.content).toContain("[...truncated]");
+    expect(result.modifications.some((modification) => modification.type === "tool-call-truncated")).toBe(true);
+    expect(result.messages.find((message) => message.entryType === "tool-call")?.content).toContain("[...truncated]");
   });
 
   test("reapplies existing segments on the next turn", async () => {

@@ -17,7 +17,7 @@ The examples use mock segment generation by default, so they run without API key
 Uses `createContextManagementMiddleware(...)` with a large token budget to show zero prompt changes when no context management work is needed.
 
 ### 02-tool-output-policies.ts
-Shows that tool-result truncation/removal is always applied, even below the segment-compression threshold.
+Shows that the new `toolPolicy(context)` function can look at both the tool call and the tool result, and that tool-call/result compression still runs below the segment-compression threshold.
 
 ### 03-persisted-segments.ts
 Demonstrates `SegmentStore` + `resolveConversationKey(...)`. The first call generates a segment, and the second call reuses it from store-backed state.
@@ -27,7 +27,8 @@ Production-style adapter setup with:
 - cache
 - segment store
 - explicit conversation key
-- tool-output hook
+- tool-content truncation hook
+- `toolPolicy(context)`
 - `createSegmentGenerator(...)`
 
 ### 05-manage-context.ts
