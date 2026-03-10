@@ -1,0 +1,46 @@
+{
+  "name": "ai-sdk-context-mgmt",
+  "version": "0.1.0",
+  "description": "AI SDK v6 middleware for context window management with two-tier compression",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "ai-sdk",
+    "middleware",
+    "context-window",
+    "compression",
+    "llm",
+    "token-management"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pablof7z/ai-sdk-context-mgmt.git"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^3.0.8",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.7.0"
+  }
+}
