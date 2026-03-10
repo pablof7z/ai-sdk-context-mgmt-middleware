@@ -118,6 +118,21 @@ export function applyRuleBasedCompression(
 
     const originalTokens = estimator.estimateMessage(msg);
 
+    // Extract original text for hook callback
+    // Handle both LanguageModelV3 format (content: [{type:"text",text:"..."}])
+    // and CoreMessage format (result: "...")
+    let originalText = "";
+    if (typeof toolResultPart?.result === "string") {
+      originalText = toolResultPart.result;
+    } else if (Array.isArray(toolResultPart?.content)) {
+      originalText = toolResultPart.content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join("\n");
+    } else if (typeof toolResultPart?.content === "string") {
+      originalText = toolResultPart.content;
+    }
+
     if (policy === "remove") {
       // Replace with brief placeholder
       const removedMsg: LanguageModelV3Message = {
@@ -141,17 +156,13 @@ export function applyRuleBasedCompression(
         originalTokens,
         compressedTokens,
         toolName,
+        toolCallId,
+        originalText,
       });
     } else if (policy === "truncate") {
-      // Extract and truncate text content
-      const textContent = toolResultPart?.content
-        ?.filter((c: any) => c.type === "text")
-        ?.map((c: any) => c.text)
-        ?.join("\n") || "";
+      const truncated = truncateText(originalText, toolOutput.maxTokens);
 
-      const truncated = truncateText(textContent, toolOutput.maxTokens);
-
-      if (truncated !== textContent) {
+      if (truncated !== originalText) {
         const truncatedMsg: LanguageModelV3Message = {
           role: "tool",
           content: [
@@ -173,6 +184,8 @@ export function applyRuleBasedCompression(
           originalTokens,
           compressedTokens,
           toolName,
+          toolCallId,
+          originalText,
         });
       } else {
         result.push(msg);

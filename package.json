@@ -42,5 +42,8 @@
     "@ai-sdk/provider": "^3.0.8",
     "@types/bun": "^1.2.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "ollama-ai-provider": "^1.2.0"
   }
 }

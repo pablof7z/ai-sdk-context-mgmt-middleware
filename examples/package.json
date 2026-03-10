@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-context-mgmt-examples",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ai": "^4.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "ai-sdk-context-mgmt-middleware": "file:.."
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

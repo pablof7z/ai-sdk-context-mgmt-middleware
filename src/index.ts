@@ -13,5 +13,6 @@ export type {
   CompressionModification,
   ToolOutputConfig,
   ToolOutputPolicy,
+  ToolOutputTruncationEvent,
   ContextDebugInfo,
 } from "./types.js";

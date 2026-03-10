@@ -12,8 +12,10 @@ function extractText(message: LanguageModelV3Message): string {
     return typeof message.content === "string" ? message.content : "";
   }
 
-  const parts = (message as any).content;
-  if (!Array.isArray(parts)) return "";
+  const content = (message as any).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts = content;
 
   const texts: string[] = [];
   for (const part of parts) {
@@ -23,6 +25,11 @@ function extractText(message: LanguageModelV3Message): string {
       texts.push(part.toolName || "");
       if (part.args) texts.push(JSON.stringify(part.args));
     } else if (part.type === "tool-result") {
+      // Handle CoreMessage format (result: string)
+      if (typeof part.result === "string") {
+        texts.push(part.result);
+      }
+      // Handle LanguageModelV3 format (content: [{type:"text",text:"..."}])
       if (Array.isArray(part.content)) {
         for (const c of part.content) {
           if (c.type === "text" && c.text) texts.push(c.text);

@@ -60,6 +60,9 @@ export interface CompressionModification {
   originalTokens: number;
   compressedTokens: number;
   toolName?: string;
+  toolCallId?: string;
+  /** Original text content of the tool output, before compression */
+  originalText?: string;
 }
 
 /**
@@ -82,6 +85,26 @@ export interface ToolOutputConfig {
   recentFullCount?: number;
   /** Per-tool policy overrides keyed by tool name */
   toolOverrides?: Record<string, ToolOutputPolicy>;
+}
+
+/**
+ * Event emitted when a tool output is truncated or removed.
+ * Consumers can use this to store original output externally
+ * and provide retrieval instructions in the replacement text.
+ */
+export interface ToolOutputTruncationEvent {
+  /** Name of the tool whose output was truncated */
+  toolName: string;
+  /** The tool call ID, if available */
+  toolCallId?: string;
+  /** Index of the message in the original array */
+  messageIndex: number;
+  /** The original full output text */
+  originalOutput: string;
+  /** Token estimate of the original output */
+  originalTokens: number;
+  /** Whether the output was completely removed vs truncated */
+  removed: boolean;
 }
 
 /**
@@ -141,4 +164,16 @@ export interface ContextManagementConfig {
 
   /** Debug callback invoked after each compression */
   onDebug?: (info: ContextDebugInfo) => void;
+
+  /**
+   * Callback invoked when a tool output is truncated or removed.
+   * Use this to store original output externally (e.g., in a RAG store)
+   * and optionally return replacement text with retrieval instructions.
+   * 
+   * If the callback returns a string, that string replaces the tool output.
+   * If it returns undefined/void, the default truncation/removal text is used.
+   */
+  onToolOutputTruncated?: (
+    event: ToolOutputTruncationEvent
+  ) => string | undefined | void | Promise<string | undefined | void>;
 }

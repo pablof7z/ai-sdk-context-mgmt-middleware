@@ -6,6 +6,7 @@ import type {
   CompressionTier,
   CompressionResult,
   TokenEstimator,
+  ToolOutputTruncationEvent,
 } from "./types.js";
 import { createDefaultEstimator } from "./token-estimator.js";
 import { applyRuleBasedCompression } from "./rule-based-compressor.js";
@@ -32,6 +33,7 @@ export function contextManagement(config: ContextManagementConfig): LanguageMode
     llmCompressor,
     cache,
     onDebug,
+    onToolOutputTruncated,
   } = config;
 
   const estimator: TokenEstimator = config.estimator || createDefaultEstimator();
@@ -126,6 +128,47 @@ export function contextManagement(config: ContextManagementConfig): LanguageMode
         compressed = ruleResult.messages;
         modifications = ruleResult.modifications;
         tier = modifications.length > 0 ? "rule-based" : "none";
+      }
+
+      // Fire onToolOutputTruncated callbacks for tool output modifications
+      if (onToolOutputTruncated && modifications.length > 0) {
+        for (const mod of modifications) {
+          if (
+            (mod.type === "tool-output-truncated" || mod.type === "tool-output-removed") &&
+            mod.originalText !== undefined
+          ) {
+            const event: ToolOutputTruncationEvent = {
+              toolName: mod.toolName || "unknown",
+              toolCallId: mod.toolCallId,
+              messageIndex: mod.messageIndex,
+              originalOutput: mod.originalText,
+              originalTokens: mod.originalTokens,
+              removed: mod.type === "tool-output-removed",
+            };
+
+            const replacement = await onToolOutputTruncated(event);
+
+            // If callback returns replacement text, update the compressed message
+            if (typeof replacement === "string") {
+              const msgIdx = mod.messageIndex;
+              // Find the corresponding message in compressed array
+              // (index may differ if messages were removed, so search by toolCallId)
+              for (let j = 0; j < compressed.length; j++) {
+                const msg = compressed[j] as any;
+                if (msg.role === "tool" && msg.content?.[0]?.toolCallId === mod.toolCallId) {
+                  compressed[j] = {
+                    ...msg,
+                    content: [{
+                      ...msg.content[0],
+                      content: [{ type: "text", text: replacement }],
+                    }],
+                  };
+                  break;
+                }
+              }
+            }
+          }
+        }
       }
 
       // Check if Tier 2 is needed

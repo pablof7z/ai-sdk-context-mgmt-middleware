@@ -9,7 +9,11 @@ interface CacheEntry {
  * Create an LRU compression cache.
  * @param maxEntries Maximum number of cached results (default: 50)
  */
-export function createCompressionCache(maxEntries = 50): CompressionCache {
+export function createCompressionCache(
+  options: number | { maxEntries?: number } = 50
+): CompressionCache {
+  const maxEntries =
+    typeof options === "number" ? options : (options.maxEntries ?? 50);
   const store = new Map<string, CacheEntry>();
 
   function evictLRU(): void {
