@@ -157,6 +157,7 @@ export function messagesToContextMessages(messages: ContextCompressionMessage[])
     if (message.role === "system") {
       return {
         id: message.id,
+        sourceRecordId: message.sourceRecordId,
         role: "system",
         content: extractTextContent(message.content),
         metadata: {
@@ -174,6 +175,7 @@ export function messagesToContextMessages(messages: ContextCompressionMessage[])
         : { content: extractTextContent(content) };
       return {
         id: message.id,
+        sourceRecordId: message.sourceRecordId,
         role: "tool",
         content: result.content,
         entryType: "tool-result",
@@ -190,6 +192,7 @@ export function messagesToContextMessages(messages: ContextCompressionMessage[])
       const result = extractToolCallText(content as any[]);
       return {
         id: message.id,
+        sourceRecordId: message.sourceRecordId,
         role: "assistant",
         content: result.content,
         entryType: "tool-call",
@@ -207,6 +210,7 @@ export function messagesToContextMessages(messages: ContextCompressionMessage[])
 
     return {
       id: message.id,
+      sourceRecordId: message.sourceRecordId,
       role: message.role,
       content: extractedContent,
       entryType: "text",
@@ -224,6 +228,7 @@ function createTextMessage(message: ContextMessage): ContextCompressionMessage {
   if (message.role === "system") {
     return {
       id: message.id,
+      sourceRecordId: originalMessage?.sourceRecordId,
       role: "system",
       content: message.content,
       providerOptions: originalMessage?.providerOptions,
@@ -235,6 +240,7 @@ function createTextMessage(message: ContextMessage): ContextCompressionMessage {
   if (!originalMessage || typeof originalMessage.content === "string") {
     return {
       id: message.id,
+      sourceRecordId: originalMessage?.sourceRecordId,
       role: outputRole,
       providerOptions: originalMessage?.providerOptions,
       content: message.content,
@@ -243,6 +249,7 @@ function createTextMessage(message: ContextMessage): ContextCompressionMessage {
 
   return {
     id: message.id,
+    sourceRecordId: originalMessage?.sourceRecordId,
     role: outputRole,
     providerOptions: originalMessage?.providerOptions,
     content: [{ type: "text", text: message.content }],
@@ -264,6 +271,7 @@ function createToolCallMessage(message: ContextMessage): ContextCompressionMessa
 
   return {
     id: message.id,
+    sourceRecordId: originalMessage?.sourceRecordId,
     role: "assistant",
     providerOptions: originalMessage?.providerOptions,
     content: [{
@@ -283,6 +291,7 @@ function createToolResultMessage(message: ContextMessage): ContextCompressionMes
 
   return {
     id: message.id,
+    sourceRecordId: originalMessage?.sourceRecordId,
     role: "tool",
     providerOptions: originalMessage?.providerOptions,
     content: [{

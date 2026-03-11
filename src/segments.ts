@@ -7,6 +7,10 @@ import type {
 
 const SEGMENT_METADATA_KEY = "segment";
 
+function getComparableId(message: ContextMessage): string {
+  return message.sourceRecordId ?? message.id;
+}
+
 export function buildSummaryMessage(segment: CompressionSegment): ContextMessage {
   return {
     id: `segment:${segment.fromId}:${segment.toId}`,
@@ -24,8 +28,8 @@ function sortSegmentsByMessageOrder(
   segments: CompressionSegment[]
 ): CompressionSegment[] {
   return [...segments].sort((left, right) => {
-    const leftIndex = messages.findIndex((message) => message.id === left.fromId);
-    const rightIndex = messages.findIndex((message) => message.id === right.fromId);
+    const leftIndex = messages.findIndex((message) => getComparableId(message) === left.fromId);
+    const rightIndex = messages.findIndex((message) => getComparableId(message) === right.fromId);
     return leftIndex - rightIndex;
   });
 }
@@ -44,8 +48,8 @@ export function validateSegments(
 
   for (let i = 0; i < sortedSegments.length; i++) {
     const segment = sortedSegments[i];
-    const fromIndex = messages.findIndex((message) => message.id === segment.fromId);
-    const toIndex = messages.findIndex((message) => message.id === segment.toId);
+    const fromIndex = messages.findIndex((message) => getComparableId(message) === segment.fromId);
+    const toIndex = messages.findIndex((message) => getComparableId(message) === segment.toId);
 
     if (fromIndex < 0) {
       return { valid: false, error: `fromId ${segment.fromId} not found` };
@@ -73,17 +77,17 @@ export function validateSegments(
   if (options?.requireFullCoverage) {
     const firstSegment = sortedSegments[0];
     const lastSegment = sortedSegments[sortedSegments.length - 1];
-    if (messages[0] && firstSegment.fromId !== messages[0].id) {
+    if (messages[0] && firstSegment.fromId !== getComparableId(messages[0])) {
       return {
         valid: false,
-        error: `First segment must start at range beginning (expected ${messages[0].id}, got ${firstSegment.fromId})`,
+        error: `First segment must start at range beginning (expected ${getComparableId(messages[0])}, got ${firstSegment.fromId})`,
       };
     }
 
-    if (messages[messages.length - 1] && lastSegment.toId !== messages[messages.length - 1].id) {
+    if (messages[messages.length - 1] && lastSegment.toId !== getComparableId(messages[messages.length - 1])) {
       return {
         valid: false,
-        error: `Last segment must end at range end (expected ${messages[messages.length - 1].id}, got ${lastSegment.toId})`,
+        error: `Last segment must end at range end (expected ${getComparableId(messages[messages.length - 1])}, got ${lastSegment.toId})`,
       };
     }
   }
@@ -104,8 +108,8 @@ export function applySegments(
   let currentIndex = 0;
 
   for (const segment of sortedSegments) {
-    const fromIndex = messages.findIndex((message) => message.id === segment.fromId);
-    const toIndex = messages.findIndex((message) => message.id === segment.toId);
+    const fromIndex = messages.findIndex((message) => getComparableId(message) === segment.fromId);
+    const toIndex = messages.findIndex((message) => getComparableId(message) === segment.toId);
 
     if (fromIndex < 0 || toIndex < 0) {
       continue;

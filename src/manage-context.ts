@@ -237,10 +237,11 @@ export async function manageContext(config: ManageContextConfig): Promise<Manage
   const compressionThreshold = config.compressionThreshold ?? DEFAULT_COMPRESSION_THRESHOLD;
   const protectedTailCount = config.protectedTailCount ?? DEFAULT_PROTECTED_TAIL_COUNT;
   const originalTokenEstimate = estimator.estimateMessages(config.messages);
+  const effectiveTokenEstimate = originalTokenEstimate + (config.priorContextTokens ?? 0);
 
   const toolPolicyResult = await applyToolPolicy(config.messages, {
     estimator,
-    currentTokenEstimate: originalTokenEstimate,
+    currentTokenEstimate: effectiveTokenEstimate,
     maxContextTokens: config.maxTokens,
     toolPolicy: config.toolPolicy,
     onToolContentTruncated: config.onToolContentTruncated,

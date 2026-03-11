@@ -207,6 +207,8 @@ describe("contextCompression", () => {
     const publicApi = await import("../index.js");
 
     expect("contextCompression" in publicApi).toBe(true);
+    expect("prunePrompt" in publicApi).toBe(true);
+    expect("summarizeConversation" in publicApi).toBe(true);
     expect("manageContext" in publicApi).toBe(false);
     expect("createContextManagementMiddleware" in publicApi).toBe(false);
     expect("contextManagement" in publicApi).toBe(false);

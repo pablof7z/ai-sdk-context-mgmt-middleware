@@ -8,18 +8,21 @@ export type ToolOutputPolicy = "keep" | "truncate" | "remove";
 export type ContextCompressionMessage =
   | {
       id: string;
+      sourceRecordId?: string;
       role: "system";
       content: string;
       providerOptions?: SharedV3ProviderOptions;
     }
   | {
       id: string;
+      sourceRecordId?: string;
       role: "user" | "assistant";
       content: string | unknown[];
       providerOptions?: SharedV3ProviderOptions;
     }
   | {
       id: string;
+      sourceRecordId?: string;
       role: "tool";
       content: unknown[];
       providerOptions?: SharedV3ProviderOptions;
@@ -27,6 +30,7 @@ export type ContextCompressionMessage =
 
 export interface ContextMessageInput {
   id?: string;
+  sourceRecordId?: string;
   role: ContextRole;
   content: string;
   entryType?: ContextEntryType;
@@ -187,6 +191,7 @@ export interface ManageContextConfig {
   maxTokens: number;
   compressionThreshold?: number;
   protectedTailCount?: number;
+  priorContextTokens?: number;
   estimator?: TokenEstimator;
   segmentGenerator?: SegmentGenerator;
   transcriptRenderer?: TranscriptRenderer;
@@ -223,6 +228,7 @@ export interface ContextCompressionConfig {
   maxTokens: number;
   compressionThreshold?: number;
   protectedTailCount?: number;
+  priorContextTokens?: number;
   estimator?: TokenEstimator;
   segmentGenerator?: SegmentGenerator;
   transcriptRenderer?: TranscriptRenderer;
