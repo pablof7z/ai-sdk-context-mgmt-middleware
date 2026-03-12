@@ -62,9 +62,7 @@ function createRetrievalPlaceholderFactory(config: ContextCompressionConfig) {
 
   return (event: ToolContentTruncationEvent): string => {
     const target = event.entryType === "tool-call" ? "input" : "output";
-    const action = event.removed ? "removed" : "truncated";
-
-    return `[Tool ${target} ${action}. Use ${config.retrievalToolName}(${argName}=${JSON.stringify(event.messageId)}) to retrieve the full ${target}.]`;
+    return `[Tool ${target} truncated. Use ${config.retrievalToolName}(${argName}=${JSON.stringify(event.messageId)}) to retrieve the full ${target}.]`;
   };
 }
 

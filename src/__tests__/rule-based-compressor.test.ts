@@ -206,9 +206,9 @@ describe("applyToolPolicy", () => {
       toolPolicy: defaultToolPolicy,
     });
 
-    // No result should be truncated or removed — all are tiny
+    // No result should be truncated — all are tiny
     const resultMods = result.modifications.filter(
-      (m) => m.type === "tool-result-truncated" || m.type === "tool-result-removed"
+      (m) => m.type === "tool-result-truncated"
     );
     expect(resultMods).toHaveLength(0);
   });
@@ -219,7 +219,7 @@ describe("applyToolPolicy", () => {
       estimator,
       currentTokenEstimate: estimator.estimateMessages(messages),
       maxContextTokens: 1_000,
-      toolPolicy: () => ({ result: { policy: "remove" } }),
+      toolPolicy: () => ({ result: { policy: "truncate", maxTokens: 0 } }),
       onToolContentTruncated: async (event) => `hook:${event.entryType}:${event.toolCallId}`,
     });
 
@@ -234,7 +234,7 @@ describe("applyToolPolicy", () => {
       estimator,
       currentTokenEstimate: estimator.estimateMessages(messages),
       maxContextTokens: 1_000,
-      toolPolicy: () => ({ result: { policy: "remove" } }),
+      toolPolicy: () => ({ result: { policy: "truncate", maxTokens: 0 } }),
       beforeToolCompression: (entries) => entries.map((entry) => (
         entry.toolName === "fs_read"
           ? { ...entry, decision: { policy: "keep" } }
@@ -244,7 +244,7 @@ describe("applyToolPolicy", () => {
     });
 
     expect(result.modifications.map((modification) => modification.type)).toEqual([
-      "tool-result-removed",
+      "tool-result-truncated",
     ]);
     expect(result.messages[1].content).toBe("should-not-be-used");
     expect(result.messages[3].content).toBe("y".repeat(600));

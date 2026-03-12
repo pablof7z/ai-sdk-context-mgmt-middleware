@@ -136,7 +136,7 @@ describe("contextCompression", () => {
       maxTokens: 5_000,
       compressionThreshold: 1,
       cache,
-      toolPolicy: () => ({ result: { policy: "remove" } }),
+      toolPolicy: () => ({ result: { policy: "truncate", maxTokens: 0 } }),
     });
     const relaxedResult = await contextCompression({
       messages,
@@ -195,11 +195,11 @@ describe("contextCompression", () => {
       compressionThreshold: 1,
       retrievalToolName: "read_tool_output",
       retrievalToolArgName: "id",
-      toolPolicy: () => ({ result: { policy: "remove" } }),
+      toolPolicy: () => ({ result: { policy: "truncate", maxTokens: 0 } }),
     });
 
     expect((result.messages[1].content[0] as any).output.value).toBe(
-      '[Tool output removed. Use read_tool_output(id="evt-tool-result-1") to retrieve the full output.]'
+      '[Tool output truncated. Use read_tool_output(id="evt-tool-result-1") to retrieve the full output.]'
     );
   });
 

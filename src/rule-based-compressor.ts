@@ -7,7 +7,6 @@ import type {
   ToolContentTruncationEvent,
   ToolEntryPolicyDecision,
   ToolEntryType,
-  ToolOutputPolicy,
   ToolPolicy,
   ToolPolicyContext,
 } from "./types.js";
@@ -263,7 +262,6 @@ async function applyEntryPolicy(
   const originalTokens = estimator.estimateMessage(message);
   const originalContent = message.content;
   const entryType = message.entryType as ToolEntryType;
-  const removed = decision.policy === "remove";
 
   const event: ToolContentTruncationEvent = {
     entryType,
@@ -273,17 +271,16 @@ async function applyEntryPolicy(
     messageIndex: -1,
     originalContent,
     originalTokens,
-    removed,
   };
 
   const overrideText = onToolContentTruncated ? await onToolContentTruncated(event) : undefined;
   const pressure = 1;
   const maxTokens = decision.maxTokens ?? defaultTruncateTokens(entryType, exchangePositionFromEnd, pressure);
-  const content = removed
-    ? (typeof overrideText === "string" && overrideText.length > 0 ? overrideText : createPlaceholder(entryType))
-    : (typeof overrideText === "string" && overrideText.length > 0 ? overrideText : truncateText(originalContent, maxTokens));
+  const content = typeof overrideText === "string" && overrideText.length > 0
+    ? overrideText
+    : truncateText(originalContent, maxTokens);
 
-  if (!removed && content === originalContent) {
+  if (content === originalContent) {
     return { message };
   }
 
@@ -296,7 +293,7 @@ async function applyEntryPolicy(
   return {
     message: nextMessage,
     modification: {
-      type: createModificationType(entryType, decision.policy),
+      type: createModificationType(entryType),
       messageIndex: -1,
       originalTokens,
       compressedTokens: estimator.estimateMessage(nextMessage),

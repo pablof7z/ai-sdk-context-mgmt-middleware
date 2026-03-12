@@ -87,7 +87,7 @@ describe("prunePrompt", () => {
       priorContextTokens: 4_900,
       promptToolPolicy: ({ currentTokenEstimate, maxContextTokens }) => ({
         result: currentTokenEstimate > maxContextTokens
-          ? { policy: "remove" }
+          ? { policy: "truncate", maxTokens: 0 }
           : { policy: "keep" },
       }),
       retrievalToolName: "fetch_tool_output",
@@ -96,7 +96,7 @@ describe("prunePrompt", () => {
 
     expect(relaxed.messages).toEqual(messages);
     expect((pressured.messages[1].content[0] as { output: { value: string } }).output.value).toBe(
-      '[Tool output removed. Use fetch_tool_output(id="prompt-tool-result") to retrieve the full output.]'
+      '[Tool output truncated. Use fetch_tool_output(id="prompt-tool-result") to retrieve the full output.]'
     );
   });
 
@@ -125,7 +125,7 @@ describe("prunePrompt", () => {
       maxTokens: 5_000,
       pruningThreshold: 1,
       priorContextTokens: 4_900,
-      promptToolPolicy: () => ({ result: { policy: "remove" } }),
+      promptToolPolicy: () => ({ result: { policy: "truncate", maxTokens: 0 } }),
       beforeToolCompression: (entries) => entries.map((entry) => (
         entry.toolName === "delegate"
           ? { ...entry, decision: { policy: "keep" } }
