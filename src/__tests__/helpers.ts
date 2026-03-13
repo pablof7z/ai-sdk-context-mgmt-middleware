@@ -4,9 +4,16 @@ import type {
   ScratchpadState,
   ScratchpadStore,
   ScratchpadStoreKey,
-} from "ai-sdk-context-management";
+} from "../types.js";
 
-export class ExampleScratchpadStore implements ScratchpadStore {
+function cloneState(state: ScratchpadState): ScratchpadState {
+  return {
+    ...state,
+    omitToolCallIds: [...state.omitToolCallIds],
+  };
+}
+
+export class InMemoryScratchpadStore implements ScratchpadStore {
   private readonly values = new Map<string, ScratchpadState>();
 
   private key(key: ScratchpadStoreKey): string {
@@ -14,14 +21,12 @@ export class ExampleScratchpadStore implements ScratchpadStore {
   }
 
   async get(key: ScratchpadStoreKey): Promise<ScratchpadState | undefined> {
-    return this.values.get(this.key(key));
+    const value = this.values.get(this.key(key));
+    return value ? cloneState(value) : undefined;
   }
 
   async set(key: ScratchpadStoreKey, state: ScratchpadState): Promise<void> {
-    this.values.set(this.key(key), {
-      ...state,
-      omitToolCallIds: [...state.omitToolCallIds],
-    });
+    this.values.set(this.key(key), cloneState(state));
   }
 
   async listConversation(conversationId: string): Promise<ScratchpadConversationEntry[]> {
@@ -36,7 +41,7 @@ export class ExampleScratchpadStore implements ScratchpadStore {
       entries.push({
         agentId,
         agentLabel: state.agentLabel,
-        state,
+        state: cloneState(state),
       });
     }
 
@@ -60,9 +65,19 @@ export function usage(): LanguageModelV3Usage {
   };
 }
 
-export function printPrompt(label: string, prompt: LanguageModelV3Prompt): void {
-  console.log(`\n${label}`);
-  for (const [index, message] of prompt.entries()) {
-    console.log(`[${index}] ${message.role} ${JSON.stringify(message)}`);
-  }
+export function makePrompt(): LanguageModelV3Prompt {
+  return [
+    { role: "system", content: "You are helpful." },
+    { role: "user", content: [{ type: "text", text: "old user" }] },
+    { role: "assistant", content: [{ type: "text", text: "old assistant" }] },
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "call-old", toolName: "fs_read", input: { path: "a.ts" } }],
+    },
+    {
+      role: "tool",
+      content: [{ type: "tool-result", toolCallId: "call-old", toolName: "fs_read", output: { type: "text", value: "contents" } }],
+    },
+    { role: "user", content: [{ type: "text", text: "latest user" }] },
+  ];
 }

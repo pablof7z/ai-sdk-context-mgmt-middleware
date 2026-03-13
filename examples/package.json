@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "ai": "^6.0.116",
     "ai-sdk-context-management": "file:.."
   },
   "devDependencies": {

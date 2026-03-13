@@ -1,36 +1,81 @@
-import type { ContextMessage, TokenEstimator } from "./types.js";
+import type {
+  LanguageModelV3Message,
+  LanguageModelV3Prompt,
+  LanguageModelV3ToolResultOutput,
+} from "@ai-sdk/provider";
+import type { PromptTokenEstimator } from "./types.js";
 
-const PER_MESSAGE_OVERHEAD = 4;
 const CHARS_PER_TOKEN = 4;
+const MESSAGE_OVERHEAD_TOKENS = 4;
 
-function estimateContextMessageChars(message: ContextMessage): number {
-  let total = message.content.length;
-
-  if (message.toolCallId) {
-    total += message.toolCallId.length;
-  }
-  if (message.toolName) {
-    total += message.toolName.length;
-  }
-  if (message.attributes) {
-    total += JSON.stringify(message.attributes).length;
+function estimateString(text: string): number {
+  if (text.length === 0) {
+    return 0;
   }
 
-  return total;
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-export function createDefaultEstimator(): TokenEstimator {
+function safeStringify(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+
+function estimateToolResultOutput(output: LanguageModelV3ToolResultOutput): number {
+  if (output.type === "text") {
+    return estimateString(output.value);
+  }
+
+  return estimateString(safeStringify(output));
+}
+
+export function createDefaultPromptTokenEstimator(): PromptTokenEstimator {
   return {
-    estimateString(text: string): number {
-      return Math.ceil(text.length / CHARS_PER_TOKEN);
-    },
+    estimateMessage(message: LanguageModelV3Message): number {
+      if (message.role === "system") {
+        return MESSAGE_OVERHEAD_TOKENS + estimateString(message.content);
+      }
 
-    estimateMessage(message: ContextMessage): number {
-      return Math.ceil(estimateContextMessageChars(message) / CHARS_PER_TOKEN) + PER_MESSAGE_OVERHEAD;
-    },
+      let total = MESSAGE_OVERHEAD_TOKENS;
 
-    estimateMessages(messages: ContextMessage[]): number {
-      return messages.reduce((sum, message) => sum + this.estimateMessage(message), 0);
+      for (const part of message.content) {
+        switch (part.type) {
+          case "text":
+          case "reasoning":
+            total += estimateString(part.text) + 1;
+            break;
+          case "file":
+            total += estimateString(part.filename ?? "");
+            total += estimateString(part.mediaType);
+            total += 16;
+            break;
+          case "tool-call":
+            total += estimateString(part.toolName);
+            total += estimateString(safeStringify(part.input));
+            total += 6;
+            break;
+          case "tool-result":
+            total += estimateString(part.toolName);
+            total += estimateToolResultOutput(part.output);
+            total += 6;
+            break;
+          case "tool-approval-response":
+            total += 8;
+            break;
+        }
+      }
+
+      return total;
+    },
+    estimatePrompt(prompt: LanguageModelV3Prompt): number {
+      return prompt.reduce((sum, message) => sum + this.estimateMessage(message), 0);
     },
   };
 }

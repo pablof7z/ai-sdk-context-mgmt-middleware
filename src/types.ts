@@ -1,258 +1,100 @@
-import type { SharedV3ProviderOptions } from "@ai-sdk/provider";
+import type {
+  LanguageModelV3CallOptions,
+  LanguageModelV3Message,
+  LanguageModelV3Middleware,
+  LanguageModelV3Prompt,
+} from "@ai-sdk/provider";
+import type { ToolSet } from "ai";
 
-export type ContextRole = "system" | "user" | "assistant" | "tool";
-export type ContextEntryType = "text" | "tool-call" | "tool-result" | "summary";
-export type ToolEntryType = "tool-call" | "tool-result";
-export type ToolOutputPolicy = "keep" | "truncate";
+export const CONTEXT_MANAGEMENT_KEY = "contextManagement";
 
-export type ContextCompressionMessage =
-  | {
-      id: string;
-      sourceRecordId?: string;
-      role: "system";
-      content: string;
-      providerOptions?: SharedV3ProviderOptions;
-    }
-  | {
-      id: string;
-      sourceRecordId?: string;
-      role: "user" | "assistant";
-      content: string | unknown[];
-      providerOptions?: SharedV3ProviderOptions;
-    }
-  | {
-      id: string;
-      sourceRecordId?: string;
-      role: "tool";
-      content: unknown[];
-      providerOptions?: SharedV3ProviderOptions;
-    };
-
-export interface ContextMessageInput {
-  id?: string;
-  sourceRecordId?: string;
-  role: ContextRole;
-  content: string;
-  entryType?: ContextEntryType;
-  toolCallId?: string;
-  toolName?: string;
-  timestamp?: number;
-  attributes?: Record<string, string>;
-  metadata?: Record<string, unknown>;
+export interface ContextManagementRequestContext {
+  conversationId: string;
+  agentId: string;
+  agentLabel?: string;
 }
 
-export interface ContextMessage extends ContextMessageInput {
-  id: string;
-  entryType: ContextEntryType;
-}
-
-export interface CompressionSegment {
-  fromId: string;
-  toId: string;
-  compressed: string;
-  createdAt?: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface TranscriptRenderResult {
-  text: string;
-  shortIdMap: Map<string, string>;
-  firstId: string | null;
-  lastId: string | null;
-}
-
-export interface TranscriptRenderOptions {
-  shortIdLength?: number;
-}
-
-export interface TranscriptRenderer {
-  render(messages: ContextMessage[], options?: TranscriptRenderOptions): TranscriptRenderResult;
-}
-
-export interface TokenEstimator {
-  estimateMessage(message: ContextMessage): number;
-  estimateMessages(messages: ContextMessage[]): number;
-  estimateString(text: string): number;
-}
-
-export interface ContextCompressionStats {
-  originalTokenEstimate: number;
-  postToolPolicyTokenEstimate: number;
-  postSegmentTokenEstimate: number;
-  finalTokenEstimate: number;
-}
-
-export interface ContextCompressionResult {
-  messages: ContextCompressionMessage[];
-  appliedSegments: CompressionSegment[];
-  newSegments: CompressionSegment[];
-  modifications: CompressionModification[];
-  stats: ContextCompressionStats;
-}
-
-export interface CompressionCache<T = ContextCompressionResult> {
-  get(key: string): T | undefined;
-  set(key: string, value: T): void;
-  clear(): void;
-  readonly size: number;
-}
-
-export interface ToolPolicyEntryContext {
-  message: ContextMessage;
-  messageIndex: number;
-  positionFromEnd: number;
-  tokens: number;
-  content: string;
-}
-
-export interface ToolEntryPolicyDecision {
-  policy: ToolOutputPolicy;
-  maxTokens?: number;
-}
-
-export interface ToolPolicyDecision {
-  call?: ToolEntryPolicyDecision;
-  result?: ToolEntryPolicyDecision;
-}
-
-export interface ToolCompressionPlanEntry {
-  message: ContextMessage;
-  messageIndex: number;
-  entryType: ToolEntryType;
+export interface RemovedToolExchange {
+  toolCallId: string;
   toolName: string;
-  toolCallId?: string;
-  exchangePositionFromEnd: number;
-  combinedTokens: number;
-  call?: ToolPolicyEntryContext;
-  result?: ToolPolicyEntryContext;
-  decision: ToolEntryPolicyDecision;
+  reason: string;
 }
 
-export interface ToolPolicyContext {
-  toolName: string;
-  toolCallId?: string;
-  call?: ToolPolicyEntryContext;
-  result?: ToolPolicyEntryContext;
-  exchangePositionFromEnd: number;
-  combinedTokens: number;
-  currentTokenEstimate: number;
-  maxContextTokens: number;
-  messages: readonly ContextMessage[];
+export interface ContextManagementStrategyState {
+  readonly params: LanguageModelV3CallOptions;
+  readonly prompt: LanguageModelV3Prompt;
+  readonly requestContext: ContextManagementRequestContext;
+  readonly removedToolExchanges: readonly RemovedToolExchange[];
+  updatePrompt(prompt: LanguageModelV3Prompt): void;
+  addRemovedToolExchanges(exchanges: RemovedToolExchange[]): void;
 }
 
-export type ToolPolicy = (
-  context: ToolPolicyContext
-) => ToolPolicyDecision | Promise<ToolPolicyDecision>;
-
-export type BeforeToolCompression = (
-  entries: readonly ToolCompressionPlanEntry[]
-) => ToolCompressionPlanEntry[] | void | Promise<ToolCompressionPlanEntry[] | void>;
-
-export interface ToolContentTruncationEvent {
-  entryType: ToolEntryType;
-  toolName: string;
-  toolCallId?: string;
-  messageId: string;
-  messageIndex: number;
-  originalContent: string;
-  originalTokens: number;
+export interface ContextManagementStrategy {
+  readonly name?: string;
+  apply(state: ContextManagementStrategyState): Promise<void> | void;
+  getOptionalTools?(): ToolSet;
 }
 
-export interface CompressionModification {
-  type:
-    | "tool-call-truncated"
-    | "tool-result-truncated"
-    | "message-removed"
-    | "conversation-summarized";
-  messageIndex: number;
-  originalTokens: number;
-  compressedTokens: number;
-  toolName?: string;
-  toolCallId?: string;
-  originalText?: string;
+export interface CreateContextManagementRuntimeOptions {
+  strategies: ContextManagementStrategy[];
 }
 
-export interface SegmentGenerationInput {
-  transcript: TranscriptRenderResult;
-  targetTokens: number;
-  messages: ContextMessage[];
-  previousSegments: CompressionSegment[];
+export interface ContextManagementRuntime {
+  middleware: LanguageModelV3Middleware;
+  optionalTools: ToolSet;
 }
 
-export interface SegmentGenerator {
-  generate(input: SegmentGenerationInput): Promise<CompressionSegment[]>;
+export interface PromptTokenEstimator {
+  estimatePrompt(prompt: LanguageModelV3Prompt): number;
+  estimateMessage(message: LanguageModelV3Message): number;
 }
 
-export interface SegmentValidationOptions {
-  requireFullCoverage?: boolean;
+export interface SlidingWindowStrategyOptions {
+  keepLastMessages?: number;
+  maxPromptTokens?: number;
+  estimator?: PromptTokenEstimator;
 }
 
-export interface ValidationResult {
-  valid: boolean;
-  error?: string;
+export interface ScratchpadStoreKey {
+  conversationId: string;
+  agentId: string;
 }
 
-export interface ManageContextResult {
-  messages: ContextMessage[];
-  appliedSegments: CompressionSegment[];
-  newSegments: CompressionSegment[];
-  modifications: CompressionModification[];
-  stats: ContextCompressionStats;
+export interface ScratchpadState {
+  notes: string;
+  keepLastMessages?: number | null;
+  omitToolCallIds: string[];
+  updatedAt?: number;
+  agentLabel?: string;
 }
 
-export interface ManageContextConfig {
-  messages: ContextMessage[];
-  maxTokens: number;
-  compressionThreshold?: number;
-  protectedTailCount?: number;
-  priorContextTokens?: number;
-  estimator?: TokenEstimator;
-  segmentGenerator?: SegmentGenerator;
-  transcriptRenderer?: TranscriptRenderer;
-  existingSegments?: CompressionSegment[];
-  toolPolicy?: ToolPolicy;
-  beforeToolCompression?: BeforeToolCompression;
-  onToolContentTruncated?: (
-    event: ToolContentTruncationEvent
-  ) => string | undefined | void | Promise<string | undefined | void>;
-  onToolOutputTruncated?: (
-    event: ToolContentTruncationEvent
-  ) => string | undefined | void | Promise<string | undefined | void>;
+export interface ScratchpadConversationEntry {
+  agentId: string;
+  agentLabel?: string;
+  state: ScratchpadState;
 }
 
-export interface ContextCompressionDebugInfo {
-  originalMessageCount: number;
-  compressedMessageCount: number;
-  originalTokenEstimate: number;
-  compressedTokenEstimate: number;
-  modifications: CompressionModification[];
-  appliedSegments: CompressionSegment[];
-  newSegments: CompressionSegment[];
-  cacheHit: boolean;
-  compressionTimeMs: number;
+export interface ScratchpadStore {
+  get(key: ScratchpadStoreKey): Promise<ScratchpadState | undefined> | ScratchpadState | undefined;
+  set(key: ScratchpadStoreKey, state: ScratchpadState): Promise<void> | void;
+  listConversation(
+    conversationId: string
+  ): Promise<ScratchpadConversationEntry[] | undefined> | ScratchpadConversationEntry[] | undefined;
 }
 
-export interface SegmentStore {
-  load(conversationKey: string): Promise<CompressionSegment[] | undefined> | CompressionSegment[] | undefined;
-  save?(conversationKey: string, segments: CompressionSegment[]): Promise<void> | void;
-  append?(conversationKey: string, segments: CompressionSegment[]): Promise<void> | void;
+export interface ScratchpadStrategyOptions {
+  scratchpadStore: ScratchpadStore;
+  maxScratchpadChars?: number;
+  maxRemovedToolReminderItems?: number;
 }
 
-export interface ContextCompressionConfig {
-  messages: ContextCompressionMessage[];
-  maxTokens: number;
-  compressionThreshold?: number;
-  protectedTailCount?: number;
-  priorContextTokens?: number;
-  estimator?: TokenEstimator;
-  segmentGenerator?: SegmentGenerator;
-  transcriptRenderer?: TranscriptRenderer;
-  segmentStore?: SegmentStore;
-  conversationKey?: string;
-  cache?: CompressionCache<ContextCompressionResult>;
-  toolPolicy?: ToolPolicy;
-  beforeToolCompression?: BeforeToolCompression;
-  retrievalToolName?: string;
-  retrievalToolArgName?: string;
-  onDebug?: (info: ContextCompressionDebugInfo) => void;
+export interface ScratchpadToolInput {
+  notes?: string;
+  keepLastMessages?: number | null;
+  omitToolCallIds?: string[];
+}
+
+export interface ScratchpadToolResult {
+  ok: true;
+  state: ScratchpadState;
 }

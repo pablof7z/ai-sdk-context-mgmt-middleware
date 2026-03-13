@@ -1,130 +1,168 @@
 # ai-sdk-context-management
 
-Reusable context compression for AI SDK-style `messages[]` arrays and other long-running conversational systems.
+Middleware-driven context management for AI SDK language models.
 
-This package helps when a conversation is too large to send as-is. It can:
-- rewrite an outgoing `messages[]` array before the model call
-- apply an always-on policy to tool calls and tool results
-- reapply previously generated summary segments
-- ask an LLM to compress older transcript ranges into replacement segments
-- enforce a final hard token-budget fallback if needed
+This package provides a small runtime that returns:
 
-The main entrypoint is `contextCompression(...)`. You pass it `messages[]` with a stable top-level `id` on every entry, and it returns rewritten `messages[]` plus compression metadata.
+- AI SDK middleware for rewriting provider prompts before each model call
+- optional SDK tools that agents can execute to manage their own future context
 
-## High-Level Flow
+V1 ships two independent strategies:
 
-```mermaid
-flowchart TD
-    A["Host Provides Full messages[] With Stable ids"] --> B["Normalize Into Addressable Context Entries"]
-    S["SegmentStore.load(conversationKey)"] --> C["Reapply Existing Segments"]
-    B --> T["Always Apply toolPolicy(context)"]
-    T --> C
-    C --> D{"Over Compression Threshold?"}
-    D -- "No" --> F["Return Rewritten messages[]"]
-    D -- "Yes" --> E["Render Candidate Range As Transcript"]
-    E --> G["SegmentGenerator Produces 1..N Segments"]
-    G --> H["Validate And Apply New Segments"]
-    H --> I{"Fits maxTokens?"}
-    C --> I
-    I -- "No" --> J["Hard Budget Fallback Trims Older History"]
-    I -- "Yes" --> F
-    J --> F
-    F --> K["SegmentStore.save/append(new or applied segments)"]
+- `SlidingWindowStrategy`: aggressively keeps a focused recent window
+- `ScratchpadStrategy`: lets agents update scratchpad notes and proactively omit older tool exchanges
+
+## Installation
+
+```bash
+npm install ai @ai-sdk/provider ai-sdk-context-management
 ```
+
+## Request Context Contract
+
+The host must pass the same request-scoped identity in both:
+
+- `providerOptions.contextManagement`
+- `experimental_context.contextManagement`
+
+```ts
+{
+  conversationId: string;
+  agentId: string;
+  agentLabel?: string;
+}
+```
+
+The middleware reads `providerOptions.contextManagement`.  
+Returned tools read `experimental_context.contextManagement`.
 
 ## Quick Start
 
 ```ts
+import { generateText, wrapLanguageModel } from "ai";
 import {
-  contextCompression,
-  createObjectSegmentGenerator,
-  createSegmentGenerator,
-  defaultToolPolicy,
+  createContextManagementRuntime,
+  ScratchpadStrategy,
+  SlidingWindowStrategy,
 } from "ai-sdk-context-management";
 
-const result = await contextCompression({
-  messages: [
-    { id: "msg-1", role: "system", content: "You are helpful." },
-    { id: "msg-2", role: "user", content: [{ type: "text", text: "Summarize the migration." }] },
-    { id: "msg-3", role: "assistant", content: [{ type: "text", text: "I am reviewing the plan." }] },
+const scratchpads = new Map<string, any>();
+
+const runtime = createContextManagementRuntime({
+  strategies: [
+    new SlidingWindowStrategy({ keepLastMessages: 6 }),
+    new ScratchpadStrategy({
+      scratchpadStore: {
+        get: ({ conversationId, agentId }) => scratchpads.get(`${conversationId}:${agentId}`),
+        set: ({ conversationId, agentId }, state) => {
+          scratchpads.set(`${conversationId}:${agentId}`, state);
+        },
+        listConversation: (conversationId) =>
+          [...scratchpads.entries()]
+            .filter(([key]) => key.startsWith(`${conversationId}:`))
+            .map(([key, state]) => ({
+              agentId: key.split(":")[1],
+              agentLabel: state.agentLabel,
+              state,
+            })),
+      },
+    }),
   ],
-  maxTokens: 128_000,
-  compressionThreshold: 0.8,
-  protectedTailCount: 4,
-  toolPolicy: defaultToolPolicy,
-  conversationKey: "conv-123",
-  segmentStore: {
-    load: (conversationKey) => loadSegments(conversationKey),
-    save: (conversationKey, segments) => saveSegments(conversationKey, segments),
-  },
-  retrievalToolName: "read_tool_output",
-  segmentGenerator: createObjectSegmentGenerator({
-    async generate(prompt) {
-      return await cheapModel.generateObject(prompt);
-    },
-  }),
 });
 
-await generateText({
+const model = wrapLanguageModel({
+  model: baseModel,
+  middleware: runtime.middleware,
+});
+
+const result = await generateText({
   model,
-  messages: result.messages,
+  messages,
+  tools: {
+    ...agentTools,
+    ...runtime.optionalTools,
+  },
+  providerOptions: {
+    contextManagement: {
+      conversationId: "conv-123",
+      agentId: "agent-456",
+      agentLabel: "Researcher",
+    },
+  },
+  experimental_context: {
+    contextManagement: {
+      conversationId: "conv-123",
+      agentId: "agent-456",
+      agentLabel: "Researcher",
+    },
+  },
 });
 ```
 
-## Core Ideas
+## API
 
-- The full conversation remains the source of truth.
-- Summary segments are host-owned state. This package does not keep hidden conversation memory.
-- `toolPolicy(context)` always runs, even when the conversation is still below the segment-compression threshold.
-- Segment generation is range-based: the engine compresses an older candidate block and keeps the protected tail intact.
-- Stable top-level message IDs are required. The package does not infer durable IDs from message text.
+### `createContextManagementRuntime({ strategies })`
 
-## What You Can Customize
+Returns:
 
-- `toolPolicy(context)`
-  - Decide separately what to do with the tool call and the tool result.
-- `beforeToolCompression(entries)`
-  - Inspect the proposed tool-compression plan and optionally return the final per-entry decisions.
-- `retrievalToolName` / `retrievalToolArgName`
-  - Replace truncated or removed tool content with a retrieval instruction that references the stable message ID.
-- `segmentGenerator`
-  - Use `createSegmentGenerator(...)`, `createObjectSegmentGenerator(...)`, or provide your own implementation.
-- `promptTemplate` / `buildPrompt(input)`
-  - Customize the default segment-generation prompt.
-- `transcriptRenderer`
-  - Change how the candidate range is rendered before LLM compression.
-- `segmentStore`
-  - Persist segments across turns with `save(...)` or `append(...)`.
-- `cache`
-  - Memoize repeated rewrites of the same `messages[]` plus segment state.
+- `middleware`
+- `optionalTools`
 
-## Learn By Example
+Strategies run in order. The runtime merges optional tools across all strategies and throws on tool-name collisions.
 
-The top-level README stays intentionally high level. The practical guide lives in [`examples/README.md`](./examples/README.md).
+### `SlidingWindowStrategy`
 
-Recommended reading order:
-1. `examples/01-basic-passthrough.ts`
-2. `examples/02-tool-output-policies.ts`
-3. `examples/03-persisted-segments.ts`
-4. `examples/04-full-pipeline.ts`
-5. `examples/05-manage-context.ts`
-6. `examples/06-segment-generator-prompt.ts`
-7. `examples/07-transcript-and-utilities.ts`
+Options:
 
-## Main Exports
+- `keepLastMessages`
+- `maxPromptTokens`
+- `estimator`
 
-- `contextCompression(...)`
-- `createObjectSegmentGenerator(...)`
-- `createSegmentGenerator(...)`
-- `buildDefaultSegmentPrompt(...)`
-- `DEFAULT_SEGMENT_PROMPT_TEMPLATE`
-- `createTranscript(...)`
-- `applySegments(...)`
-- `validateSegments(...)`
-- `buildSummaryMessage(...)`
-- `defaultToolPolicy(...)`
-- `createCompressionCache(...)`
+Behavior:
 
-## License
+- keeps all system messages
+- keeps the newest non-system messages
+- preserves tool-call/tool-result adjacency at the trim boundary
+- records removed tool exchanges for later reminder rendering
 
-MIT
+### `ScratchpadStrategy`
+
+Options:
+
+- `scratchpadStore`
+- `maxScratchpadChars`
+- `maxRemovedToolReminderItems`
+
+Returns one tool: `scratchpad`
+
+Tool input:
+
+```ts
+{
+  notes?: string;
+  keepLastMessages?: number | null;
+  omitToolCallIds?: string[];
+}
+```
+
+Behavior:
+
+- loads the current agent scratchpad
+- optionally omits older tool exchanges by `toolCallId`
+- optionally shrinks the visible tail further
+- injects a compact reminder into the latest user message with:
+  - the current agent scratchpad
+  - other agents' scratchpads with attribution
+  - removed tool exchanges
+
+## Running Locally
+
+```bash
+bun test
+bun run typecheck
+bun run build
+```
+
+## Examples
+
+See [`examples/README.md`](./examples/README.md) for runnable examples.
