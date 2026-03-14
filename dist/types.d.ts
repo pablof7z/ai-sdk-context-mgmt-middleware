@@ -15,6 +15,15 @@ export interface RemovedToolExchange {
     toolName: string;
     reason: string;
 }
+export interface ContextManagementReminder {
+    kind: string;
+    content: string;
+    attributes?: Record<string, string>;
+    disposition?: "queue" | "defer";
+}
+export interface ContextManagementReminderSink {
+    emit(reminder: ContextManagementReminder, requestContext?: ContextManagementRequestContext): Promise<void> | void;
+}
 export interface ContextManagementStrategyState {
     readonly params: LanguageModelV3CallOptions;
     readonly prompt: LanguageModelV3Prompt;
@@ -26,6 +35,7 @@ export interface ContextManagementStrategyState {
     updateParams(patch: Partial<LanguageModelV3CallOptions>): void;
     addRemovedToolExchanges(exchanges: RemovedToolExchange[]): void;
     addPinnedToolCallIds(toolCallIds: string[]): void;
+    emitReminder(reminder: ContextManagementReminder): Promise<void>;
 }
 export interface ContextManagementStrategyExecution {
     outcome?: "applied" | "skipped";
@@ -117,6 +127,7 @@ export interface CreateContextManagementRuntimeOptions {
     strategies: ContextManagementStrategy[];
     telemetry?: ContextManagementTelemetrySink;
     estimator?: PromptTokenEstimator;
+    reminderSink?: ContextManagementReminderSink;
 }
 export interface ContextManagementRuntime {
     middleware: LanguageModelV3Middleware;

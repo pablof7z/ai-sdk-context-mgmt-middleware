@@ -6,5 +6,5 @@ export declare class ContextUtilizationReminderStrategy implements ContextManage
     private readonly estimator;
     private readonly mode;
     constructor(options: ContextUtilizationReminderStrategyOptions);
-    apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution;
+    apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;
 }

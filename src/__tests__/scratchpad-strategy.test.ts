@@ -1,5 +1,10 @@
 import { ScratchpadStrategy } from "../index.js";
+import { appendReminderToLatestUserMessage } from "../prompt-utils.js";
 import { InMemoryScratchpadStore, makePrompt } from "./helpers.js";
+
+function emitReminderToPrompt(state: { prompt: any; updatePrompt: (prompt: any) => void }, reminder: { content: string }) {
+  state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminder.content));
+}
 
 describe("ScratchpadStrategy", () => {
   test("scratchpad tool updates only the caller state using experimental_context", async () => {
@@ -101,6 +106,9 @@ describe("ScratchpadStrategy", () => {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
       },
       addPinnedToolCallIds() {},
+      async emitReminder(reminder: { content: string }) {
+        emitReminderToPrompt(this, reminder);
+      },
     };
 
     const result = await strategy.apply(state as any);
@@ -180,6 +188,9 @@ describe("ScratchpadStrategy", () => {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
       },
       addPinnedToolCallIds() {},
+      async emitReminder(reminder: { content: string }) {
+        emitReminderToPrompt(this, reminder);
+      },
     };
 
     await strategy.apply(state as any);
@@ -225,6 +236,9 @@ describe("ScratchpadStrategy", () => {
         for (const id of ids) {
           pinnedToolCallIds.add(id);
         }
+      },
+      async emitReminder(reminder: { content: string }) {
+        emitReminderToPrompt(this, reminder);
       },
     };
 
@@ -297,6 +311,9 @@ describe("ScratchpadStrategy", () => {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
       },
       addPinnedToolCallIds() {},
+      async emitReminder(reminder: { content: string }) {
+        emitReminderToPrompt(this, reminder);
+      },
     };
 
     const result = await strategy.apply(state as any);
@@ -383,6 +400,9 @@ describe("ScratchpadStrategy", () => {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
       },
       addPinnedToolCallIds() {},
+      async emitReminder(reminder: { content: string }) {
+        emitReminderToPrompt(this, reminder);
+      },
     };
 
     const result = await strategy.apply(state as any);

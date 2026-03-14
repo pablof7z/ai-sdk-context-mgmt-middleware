@@ -1,11 +1,13 @@
 import type { LanguageModelV3CallOptions, LanguageModelV3Middleware, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import type { ToolSet } from "ai";
-import { clonePrompt, extractRequestContext } from "./prompt-utils.js";
+import { appendReminderToLatestUserMessage, clonePrompt, extractRequestContext } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 import type {
   ContextManagementModelRef,
   ContextManagementRequestContext,
+  ContextManagementReminder,
+  ContextManagementReminderSink,
   ContextManagementRuntime,
   ContextManagementStrategy,
   ContextManagementStrategyExecution,
@@ -24,7 +26,8 @@ class StrategyState implements ContextManagementStrategyState {
   constructor(
     params: LanguageModelV3CallOptions,
     public readonly requestContext: ContextManagementRequestContext,
-    public readonly model?: ContextManagementModelRef
+    public readonly model?: ContextManagementModelRef,
+    private readonly reminderSink?: ContextManagementReminderSink
   ) {
     this.currentParams = {
       ...params,
@@ -73,6 +76,15 @@ class StrategyState implements ContextManagementStrategyState {
     for (const id of toolCallIds) {
       this.pinned.add(id);
     }
+  }
+
+  async emitReminder(reminder: ContextManagementReminder): Promise<void> {
+    if (this.reminderSink) {
+      await this.reminderSink.emit(reminder, this.requestContext);
+      return;
+    }
+
+    this.updatePrompt(appendReminderToLatestUserMessage(this.prompt, reminder.content));
   }
 }
 
@@ -264,7 +276,7 @@ export function createContextManagementRuntime(
       const state = new StrategyState(params, requestContext, {
         provider: model.provider,
         modelId: model.modelId,
-      });
+      }, options.reminderSink);
       const initialPrompt = clonePrompt(state.prompt);
       const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
       const estimate = (prompt: LanguageModelV3Prompt) =>

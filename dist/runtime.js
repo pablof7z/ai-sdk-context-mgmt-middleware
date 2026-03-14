@@ -1,15 +1,17 @@
-import { clonePrompt, extractRequestContext } from "./prompt-utils.js";
+import { appendReminderToLatestUserMessage, clonePrompt, extractRequestContext } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 class StrategyState {
     requestContext;
     model;
+    reminderSink;
     currentParams;
     removedByToolCallId = new Map();
     pinned = new Set();
-    constructor(params, requestContext, model) {
+    constructor(params, requestContext, model, reminderSink) {
         this.requestContext = requestContext;
         this.model = model;
+        this.reminderSink = reminderSink;
         this.currentParams = {
             ...params,
             prompt: clonePrompt(params.prompt),
@@ -49,6 +51,13 @@ class StrategyState {
         for (const id of toolCallIds) {
             this.pinned.add(id);
         }
+    }
+    async emitReminder(reminder) {
+        if (this.reminderSink) {
+            await this.reminderSink.emit(reminder, this.requestContext);
+            return;
+        }
+        this.updatePrompt(appendReminderToLatestUserMessage(this.prompt, reminder.content));
     }
 }
 function cloneUnknown(value) {
@@ -202,7 +211,7 @@ export function createContextManagementRuntime(options) {
             const state = new StrategyState(params, requestContext, {
                 provider: model.provider,
                 modelId: model.modelId,
-            });
+            }, options.reminderSink);
             const initialPrompt = clonePrompt(state.prompt);
             const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
             const estimate = (prompt) => estimator.estimatePrompt(prompt) + toolTokenOverhead;

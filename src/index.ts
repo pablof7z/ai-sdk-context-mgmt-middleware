@@ -24,6 +24,8 @@ export type {
   CompactionToolStrategyOptions,
   ContextManagementModelRef,
   ContextManagementRequestContext,
+  ContextManagementReminder,
+  ContextManagementReminderSink,
   ContextManagementRuntime,
   ContextManagementStrategy,
   ContextManagementStrategyExecution,

@@ -215,4 +215,58 @@ describe("createContextManagementRuntime", () => {
     );
     expect(typeof result?.render).toBe("function");
   });
+
+  test("emits structured reminders to a sink instead of mutating the prompt", async () => {
+    const reminders: Array<{ kind: string; content: string }> = [];
+    const runtime = createContextManagementRuntime({
+      strategies: [
+        {
+          name: "custom-reminder",
+          async apply(state) {
+            await state.emitReminder({
+              kind: "custom-reminder",
+              content: "check the working set",
+            });
+          },
+        },
+      ],
+      reminderSink: {
+        emit(reminder) {
+          reminders.push({
+            kind: reminder.kind,
+            content: reminder.content,
+          });
+        },
+      },
+    });
+
+    const prompt = makePrompt();
+    const result = await runtime.middleware.transformParams?.({
+      params: {
+        prompt,
+        providerOptions: {
+          contextManagement: {
+            conversationId: "conv-1",
+            agentId: "agent-1",
+          },
+        },
+      },
+      model: {
+        specificationVersion: "v3",
+        provider: "mock",
+        modelId: "mock",
+        supportedUrls: {},
+        doGenerate: async () => { throw new Error("unused"); },
+        doStream: async () => { throw new Error("unused"); },
+      },
+    } as any);
+
+    expect(result?.prompt).toEqual(prompt);
+    expect(reminders).toEqual([
+      {
+        kind: "custom-reminder",
+        content: "check the working set",
+      },
+    ]);
+  });
 });

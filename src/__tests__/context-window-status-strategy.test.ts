@@ -71,7 +71,7 @@ describe("ContextWindowStatusStrategy", () => {
     }
   });
 
-  test("skips when neither working budget nor raw context window is available", () => {
+  test("skips when neither working budget nor raw context window is available", async () => {
     const strategy = new ContextWindowStatusStrategy({
       estimator: {
         estimateMessage: () => 10,
@@ -91,9 +91,12 @@ describe("ContextWindowStatusStrategy", () => {
       updateParams() {},
       addRemovedToolExchanges() {},
       addPinnedToolCallIds() {},
+      emitReminder() {
+        throw new Error("unused");
+      },
     } as any;
 
-    const result = strategy.apply(state);
+    const result = await strategy.apply(state);
 
     expect(result).toEqual({
       outcome: "skipped",

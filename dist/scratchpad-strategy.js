@@ -1,5 +1,5 @@
 import { jsonSchema, tool } from "ai";
-import { appendReminderToLatestUserMessage, getLatestToolActivity, removeToolExchanges, trimPromptToLastMessages, } from "./prompt-utils.js";
+import { getLatestToolActivity, removeToolExchanges, trimPromptToLastMessages, } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 const DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS = 10;
@@ -219,7 +219,10 @@ export class ScratchpadStrategy {
             reminderTone: this.reminderTone,
             maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
         });
-        state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
+        await state.emitReminder({
+            kind: "scratchpad",
+            content: reminderBlock,
+        });
         const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
             + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
         const forceThresholdTokens = this.forceToolThresholdRatio !== undefined

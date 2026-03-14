@@ -1,4 +1,3 @@
-import { appendReminderToLatestUserMessage } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
@@ -63,7 +62,7 @@ export class ContextWindowStatusStrategy implements ContextManagementStrategy {
     this.getContextWindow = options.getContextWindow;
   }
 
-  apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const estimatedPromptTokens = this.estimator.estimatePrompt(state.prompt);
     const rawContextWindow = this.getContextWindow?.({
       model: state.model,
@@ -86,7 +85,10 @@ export class ContextWindowStatusStrategy implements ContextManagementStrategy {
       workingTokenBudget: this.workingTokenBudget,
     });
 
-    state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderText));
+    await state.emitReminder({
+      kind: "context-window-status",
+      content: reminderText,
+    });
 
     return {
       reason: "context-window-status-injected",

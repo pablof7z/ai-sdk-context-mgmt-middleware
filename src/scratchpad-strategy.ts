@@ -1,6 +1,5 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
 import {
-  appendReminderToLatestUserMessage,
   getLatestToolActivity,
   removeToolExchanges,
   trimPromptToLastMessages,
@@ -309,7 +308,10 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
       maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
     });
 
-    state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
+    await state.emitReminder({
+      kind: "scratchpad",
+      content: reminderBlock,
+    });
 
     const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
       + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);

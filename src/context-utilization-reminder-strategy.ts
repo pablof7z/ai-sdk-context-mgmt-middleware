@@ -1,4 +1,3 @@
-import { appendReminderToLatestUserMessage } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
@@ -53,7 +52,7 @@ export class ContextUtilizationReminderStrategy implements ContextManagementStra
     this.mode = options.mode ?? "generic";
   }
 
-  apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const currentTokens = this.estimator.estimatePrompt(state.prompt)
       + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
     const warningThresholdTokens = Math.floor(this.workingTokenBudget * this.warningThresholdRatio);
@@ -79,7 +78,10 @@ export class ContextUtilizationReminderStrategy implements ContextManagementStra
       mode: this.mode,
     });
 
-    state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderText));
+    await state.emitReminder({
+      kind: "context-utilization",
+      content: reminderText,
+    });
 
     return {
       reason: "warning-injected",

@@ -1,5 +1,6 @@
 import { ContextUtilizationReminderStrategy, createContextManagementRuntime } from "../index.js";
 import type { ContextManagementTelemetryEvent } from "../index.js";
+import { appendReminderToLatestUserMessage } from "../prompt-utils.js";
 import { makePrompt } from "./helpers.js";
 
 describe("ContextUtilizationReminderStrategy", () => {
@@ -26,9 +27,12 @@ describe("ContextUtilizationReminderStrategy", () => {
       updateParams() {},
       addRemovedToolExchanges() {},
       addPinnedToolCallIds() {},
+      emitReminder() {
+        throw new Error("unused");
+      },
     } as any;
 
-    const result = strategy.apply(state);
+    const result = await strategy.apply(state);
 
     expect(result).toEqual({
       reason: "below-warning-threshold",
@@ -105,7 +109,7 @@ describe("ContextUtilizationReminderStrategy", () => {
     }
   });
 
-  test("inserts a tagged system reminder when there is no user message to append to", () => {
+  test("inserts a tagged system reminder when there is no user message to append to", async () => {
     const strategy = new ContextUtilizationReminderStrategy({
       workingTokenBudget: 10,
       estimator: {
@@ -141,9 +145,12 @@ describe("ContextUtilizationReminderStrategy", () => {
       updateParams() {},
       addRemovedToolExchanges() {},
       addPinnedToolCallIds() {},
+      async emitReminder(reminder: { content: string }) {
+        this.updatePrompt(appendReminderToLatestUserMessage(this.prompt, reminder.content));
+      },
     } as any;
 
-    strategy.apply(state);
+    await strategy.apply(state);
 
     expect(state.prompt.map((message: typeof prompt[number]) => message.role)).toEqual([
       "system",

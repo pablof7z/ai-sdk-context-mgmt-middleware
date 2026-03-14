@@ -1,4 +1,3 @@
-import { appendReminderToLatestUserMessage } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 function formatNumber(value) {
     return value.toLocaleString("en-US");
@@ -38,7 +37,7 @@ export class ContextWindowStatusStrategy {
         this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
         this.getContextWindow = options.getContextWindow;
     }
-    apply(state) {
+    async apply(state) {
         const estimatedPromptTokens = this.estimator.estimatePrompt(state.prompt);
         const rawContextWindow = this.getContextWindow?.({
             model: state.model,
@@ -58,7 +57,10 @@ export class ContextWindowStatusStrategy {
             rawContextWindow,
             workingTokenBudget: this.workingTokenBudget,
         });
-        state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderText));
+        await state.emitReminder({
+            kind: "context-window-status",
+            content: reminderText,
+        });
         return {
             reason: "context-window-status-injected",
             ...(this.workingTokenBudget !== undefined

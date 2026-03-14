@@ -5,5 +5,5 @@ export declare class ContextWindowStatusStrategy implements ContextManagementStr
     private readonly estimator;
     private readonly getContextWindow?;
     constructor(options?: ContextWindowStatusStrategyOptions);
-    apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution;
+    apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;
 }
