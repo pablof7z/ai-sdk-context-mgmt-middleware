@@ -18,6 +18,7 @@ export interface ContextManagementStrategyState {
     readonly removedToolExchanges: readonly RemovedToolExchange[];
     readonly pinnedToolCallIds: ReadonlySet<string>;
     updatePrompt(prompt: LanguageModelV3Prompt): void;
+    updateParams(patch: Partial<LanguageModelV3CallOptions>): void;
     addRemovedToolExchanges(exchanges: RemovedToolExchange[]): void;
     addPinnedToolCallIds(toolCallIds: string[]): void;
 }
@@ -119,6 +120,7 @@ export interface ContextManagementRuntime {
 export interface PromptTokenEstimator {
     estimatePrompt(prompt: LanguageModelV3Prompt): number;
     estimateMessage(message: LanguageModelV3Message): number;
+    estimateTools?(tools: LanguageModelV3CallOptions["tools"]): number;
 }
 export interface ToolResultDecayStrategyOptions {
     keepFullResultCount?: number;
@@ -218,6 +220,9 @@ export interface ScratchpadStrategyOptions {
     scratchpadStore: ScratchpadStore;
     reminderTone?: "informational" | "urgent" | "silent";
     maxRemovedToolReminderItems?: number;
+    workingTokenBudget?: number;
+    forceToolThresholdRatio?: number;
+    estimator?: PromptTokenEstimator;
 }
 export interface ScratchpadToolInput {
     notes?: string;

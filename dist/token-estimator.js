@@ -61,5 +61,24 @@ export function createDefaultPromptTokenEstimator() {
         estimatePrompt(prompt) {
             return prompt.reduce((sum, message) => sum + this.estimateMessage(message), 0);
         },
+        estimateTools(tools) {
+            if (!tools || tools.length === 0) {
+                return 0;
+            }
+            let total = 0;
+            for (const tool of tools) {
+                if (tool.type === "function") {
+                    total += estimateString(tool.name);
+                    total += estimateString(tool.description ?? "");
+                    total += estimateString(safeStringify(tool.inputSchema));
+                    total += 6; // overhead per tool definition
+                }
+                else {
+                    // Provider-defined tools — estimate from the full serialized form
+                    total += estimateString(safeStringify(tool));
+                }
+            }
+            return total;
+        },
     };
 }

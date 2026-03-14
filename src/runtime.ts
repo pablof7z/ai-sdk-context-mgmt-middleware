@@ -53,6 +53,14 @@ class StrategyState implements ContextManagementStrategyState {
     };
   }
 
+  updateParams(patch: Partial<LanguageModelV3CallOptions>): void {
+    this.currentParams = {
+      ...this.currentParams,
+      ...patch,
+      prompt: patch.prompt ?? this.currentParams.prompt,
+    };
+  }
+
   addRemovedToolExchanges(exchanges: RemovedToolExchange[]): void {
     for (const exchange of exchanges) {
       this.removedByToolCallId.set(exchange.toolCallId, exchange);
@@ -245,13 +253,16 @@ export function createContextManagementRuntime(
 
       const state = new StrategyState(params, requestContext);
       const initialPrompt = clonePrompt(state.prompt);
+      const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
+      const estimate = (prompt: LanguageModelV3Prompt) =>
+        estimator.estimatePrompt(prompt) + toolTokenOverhead;
 
       await emitTelemetry(options.telemetry, {
         type: "runtime-start",
         requestContext,
         strategyNames: strategies.map((strategy) => strategy.name ?? "unnamed-strategy"),
         optionalToolNames: Object.keys(optionalTools),
-        estimatedTokensBefore: estimator.estimatePrompt(initialPrompt),
+        estimatedTokensBefore: estimate(initialPrompt),
         payloads: {
           prompt: initialPrompt,
           providerOptions: cloneUnknown(params.providerOptions),
@@ -262,10 +273,10 @@ export function createContextManagementRuntime(
         const promptBefore = clonePrompt(state.prompt);
         const removedBefore = state.removedToolExchanges.length;
         const pinnedBefore = state.pinnedToolCallIds.size;
-        const estimatedTokensBefore = estimator.estimatePrompt(promptBefore);
+        const estimatedTokensBefore = estimate(promptBefore);
         const execution: ContextManagementStrategyExecution | void = await strategy.apply(state);
         const promptAfter = clonePrompt(state.prompt);
-        const estimatedTokensAfter = estimator.estimatePrompt(promptAfter);
+        const estimatedTokensAfter = estimate(promptAfter);
         const removedAfter = state.removedToolExchanges.length;
         const pinnedAfter = state.pinnedToolCallIds.size;
         const changed = !promptsEqual(promptBefore, promptAfter)
@@ -295,8 +306,8 @@ export function createContextManagementRuntime(
       await emitTelemetry(options.telemetry, {
         type: "runtime-complete",
         requestContext,
-        estimatedTokensBefore: estimator.estimatePrompt(initialPrompt),
-        estimatedTokensAfter: estimator.estimatePrompt(state.prompt),
+        estimatedTokensBefore: estimate(initialPrompt),
+        estimatedTokensAfter: estimate(state.prompt),
         removedToolExchangesTotal: state.removedToolExchanges.length,
         pinnedToolCallIdsTotal: state.pinnedToolCallIds.size,
         payloads: {

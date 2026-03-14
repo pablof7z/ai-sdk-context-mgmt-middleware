@@ -20,7 +20,8 @@ export class SummarizationStrategy {
         this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
     }
     async apply(state) {
-        const estimatedTokens = this.estimator.estimatePrompt(state.prompt);
+        const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
+            + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
         if (estimatedTokens <= this.maxPromptTokens) {
             return {
                 reason: "below-token-threshold",

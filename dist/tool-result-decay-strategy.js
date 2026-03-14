@@ -22,7 +22,8 @@ export class ToolResultDecayStrategy {
         this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
     }
     apply(state) {
-        const currentPromptTokens = this.estimator.estimatePrompt(state.prompt);
+        const currentPromptTokens = this.estimator.estimatePrompt(state.prompt)
+            + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
         if (this.maxPromptTokens !== undefined &&
             currentPromptTokens <= this.maxPromptTokens) {
             return {

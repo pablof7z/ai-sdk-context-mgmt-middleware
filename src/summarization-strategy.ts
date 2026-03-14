@@ -39,7 +39,8 @@ export class SummarizationStrategy implements ContextManagementStrategy {
   }
 
   async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
-    const estimatedTokens = this.estimator.estimatePrompt(state.prompt);
+    const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
+      + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
 
     if (estimatedTokens <= this.maxPromptTokens) {
       return {

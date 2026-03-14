@@ -54,7 +54,8 @@ export class ContextUtilizationReminderStrategy implements ContextManagementStra
   }
 
   apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
-    const currentTokens = this.estimator.estimatePrompt(state.prompt);
+    const currentTokens = this.estimator.estimatePrompt(state.prompt)
+      + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
     const warningThresholdTokens = Math.floor(this.workingTokenBudget * this.warningThresholdRatio);
 
     if (currentTokens < warningThresholdTokens) {

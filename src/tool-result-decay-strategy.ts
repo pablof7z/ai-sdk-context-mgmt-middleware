@@ -33,7 +33,8 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
   }
 
   apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
-    const currentPromptTokens = this.estimator.estimatePrompt(state.prompt);
+    const currentPromptTokens = this.estimator.estimatePrompt(state.prompt)
+      + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
     if (
       this.maxPromptTokens !== undefined &&
       currentPromptTokens <= this.maxPromptTokens
