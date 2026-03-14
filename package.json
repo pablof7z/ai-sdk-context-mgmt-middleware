@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-context-management",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Middleware-driven context management strategies for AI SDK language models",
   "type": "module",
   "main": "./dist/index.js",
