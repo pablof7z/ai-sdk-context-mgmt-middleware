@@ -26,10 +26,22 @@ function cloneUnknown<T>(value: T): T {
   }
 
   if (typeof structuredClone === "function") {
-    return structuredClone(value);
+    try {
+      return structuredClone(value);
+    } catch {
+      return value;
+    }
   }
 
   return value;
+}
+
+function buildReminderSystemMessage(reminderText: string): LanguageModelV3Message {
+  return {
+    role: "system",
+    content: reminderText,
+    providerOptions: { contextManagement: { type: "reminder" } },
+  };
 }
 
 function cloneMessage(message: LanguageModelV3Message): LanguageModelV3Message {
@@ -519,11 +531,11 @@ export function appendReminderToLatestUserMessage(
     return cloned;
   }
 
-  return [
-    ...cloned,
-    {
-      role: "user",
-      content: [{ type: "text", text: reminderText }],
-    },
-  ];
+  const insertIndex =
+    cloned.reduce(
+      (lastIndex, message, index) => (message.role === "system" ? index : lastIndex),
+      -1
+    ) + 1;
+  cloned.splice(insertIndex, 0, buildReminderSystemMessage(reminderText));
+  return cloned;
 }

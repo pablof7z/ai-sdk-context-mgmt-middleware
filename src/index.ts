@@ -12,6 +12,7 @@ export {
   createLlmSummarizer,
 } from "./llm-summarizer.js";
 export { ContextUtilizationReminderStrategy } from "./context-utilization-reminder-strategy.js";
+export { ContextWindowStatusStrategy } from "./context-window-status-strategy.js";
 export { CompactionToolStrategy } from "./compaction-tool-strategy.js";
 export { PinnedMessagesStrategy } from "./pinned-messages-strategy.js";
 export { createDefaultPromptTokenEstimator } from "./token-estimator.js";
@@ -21,6 +22,7 @@ export type {
   CompactionStore,
   CompactionStoreKey,
   CompactionToolStrategyOptions,
+  ContextManagementModelRef,
   ContextManagementRequestContext,
   ContextManagementRuntime,
   ContextManagementStrategy,
@@ -28,6 +30,7 @@ export type {
   ContextManagementStrategyState,
   ContextManagementTelemetryEvent,
   ContextManagementTelemetrySink,
+  ContextWindowStatusStrategyOptions,
   ContextUtilizationReminderStrategyOptions,
   CreateContextManagementRuntimeOptions,
   HeadAndTailStrategyOptions,

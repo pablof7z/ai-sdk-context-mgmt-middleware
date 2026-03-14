@@ -104,4 +104,61 @@ describe("ContextUtilizationReminderStrategy", () => {
       );
     }
   });
+
+  test("inserts a tagged system reminder when there is no user message to append to", () => {
+    const strategy = new ContextUtilizationReminderStrategy({
+      workingTokenBudget: 10,
+      estimator: {
+        estimateMessage: () => 1,
+        estimatePrompt: () => 24,
+      },
+    });
+
+    const prompt = [
+      { role: "system" as const, content: "You are helpful." },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "Working..." }] },
+      {
+        role: "tool" as const,
+        content: [
+          {
+            type: "tool-result" as const,
+            toolCallId: "call-1",
+            toolName: "fs_read",
+            output: { type: "text" as const, value: "done" },
+          },
+        ],
+      },
+    ];
+    const state = {
+      params: { prompt, providerOptions: {} },
+      prompt,
+      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
+      removedToolExchanges: [],
+      pinnedToolCallIds: new Set<string>(),
+      updatePrompt(nextPrompt: typeof prompt) {
+        this.prompt = nextPrompt;
+      },
+      updateParams() {},
+      addRemovedToolExchanges() {},
+      addPinnedToolCallIds() {},
+    } as any;
+
+    strategy.apply(state);
+
+    expect(state.prompt.map((message: typeof prompt[number]) => message.role)).toEqual([
+      "system",
+      "system",
+      "assistant",
+      "tool",
+    ]);
+    expect(state.prompt[1]).toEqual({
+      role: "system",
+      content: expect.stringContaining("Your working context is getting tight."),
+      providerOptions: {
+        contextManagement: {
+          type: "reminder",
+        },
+      },
+    });
+  });
 });

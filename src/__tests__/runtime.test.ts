@@ -127,4 +127,92 @@ describe("createContextManagementRuntime", () => {
       });
     }
   });
+
+  test("telemetry failures do not break transformParams", async () => {
+    const runtime = createContextManagementRuntime({
+      strategies: [new SlidingWindowStrategy({ keepLastMessages: 2 })],
+      telemetry: async () => {
+        throw new Error("telemetry unavailable");
+      },
+    });
+
+    const result = await runtime.middleware.transformParams?.({
+      params: {
+        prompt: makePrompt(),
+        providerOptions: {
+          contextManagement: {
+            conversationId: "conv-1",
+            agentId: "agent-1",
+          },
+        },
+      },
+      model: {
+        specificationVersion: "v3",
+        provider: "mock",
+        modelId: "mock",
+        supportedUrls: {},
+        doGenerate: async () => { throw new Error("unused"); },
+        doStream: async () => { throw new Error("unused"); },
+      },
+    } as any);
+
+    expect(result?.prompt.map((message) => message.role)).toEqual([
+      "system",
+      "assistant",
+      "tool",
+      "user",
+    ]);
+  });
+
+  test("tool execution stays successful when telemetry cannot clone or emit payloads", async () => {
+    const runtime = createContextManagementRuntime({
+      strategies: [
+        {
+          name: "custom-tool",
+          apply() {},
+          getOptionalTools() {
+            return {
+              custom_tool: {
+                description: "Returns a non-cloneable payload.",
+                inputSchema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {},
+                },
+                async execute() {
+                  return {
+                    ok: true,
+                    render: () => "non-cloneable",
+                  };
+                },
+              },
+            } as any;
+          },
+        },
+      ],
+      telemetry: async () => {
+        throw new Error("telemetry unavailable");
+      },
+    });
+
+    const result = await runtime.optionalTools.custom_tool.execute?.(
+      {},
+      {
+        messages: [],
+        experimental_context: {
+          contextManagement: {
+            conversationId: "conv-1",
+            agentId: "agent-1",
+          },
+        },
+      }
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+      })
+    );
+    expect(typeof result?.render).toBe("function");
+  });
 });

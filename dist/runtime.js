@@ -3,11 +3,13 @@ import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 class StrategyState {
     requestContext;
+    model;
     currentParams;
     removedByToolCallId = new Map();
     pinned = new Set();
-    constructor(params, requestContext) {
+    constructor(params, requestContext, model) {
         this.requestContext = requestContext;
+        this.model = model;
         this.currentParams = {
             ...params,
             prompt: clonePrompt(params.prompt),
@@ -54,7 +56,12 @@ function cloneUnknown(value) {
         return value;
     }
     if (typeof structuredClone === "function") {
-        return structuredClone(value);
+        try {
+            return structuredClone(value);
+        }
+        catch {
+            return value;
+        }
     }
     return value;
 }
@@ -91,11 +98,16 @@ function extractRequestContextFromExperimentalContext(experimentalContext) {
         ...(typeof agentLabel === "string" && agentLabel.length > 0 ? { agentLabel } : {}),
     };
 }
-async function emitTelemetry(telemetry, event) {
+async function emitTelemetry(telemetry, buildEvent) {
     if (!telemetry) {
         return;
     }
-    await telemetry(event);
+    try {
+        await telemetry(buildEvent());
+    }
+    catch {
+        // Telemetry is best-effort and must never break model or tool execution.
+    }
 }
 function mergeOptionalTools(strategies) {
     const merged = {};
@@ -131,7 +143,7 @@ function wrapOptionalTools(tools, toolOwners, telemetry) {
             ...toolDefinition,
             execute: async (input, options) => {
                 const requestContext = extractRequestContextFromExperimentalContext(options.experimental_context);
-                await emitTelemetry(telemetry, {
+                await emitTelemetry(telemetry, () => ({
                     type: "tool-execute-start",
                     toolName,
                     strategyName,
@@ -140,10 +152,10 @@ function wrapOptionalTools(tools, toolOwners, telemetry) {
                     payloads: {
                         input: cloneUnknown(input),
                     },
-                });
+                }));
                 try {
                     const result = await execute(input, options);
-                    await emitTelemetry(telemetry, {
+                    await emitTelemetry(telemetry, () => ({
                         type: "tool-execute-complete",
                         toolName,
                         strategyName,
@@ -153,11 +165,11 @@ function wrapOptionalTools(tools, toolOwners, telemetry) {
                             input: cloneUnknown(input),
                             result: cloneUnknown(result),
                         },
-                    });
+                    }));
                     return result;
                 }
                 catch (error) {
-                    await emitTelemetry(telemetry, {
+                    await emitTelemetry(telemetry, () => ({
                         type: "tool-execute-error",
                         toolName,
                         strategyName,
@@ -167,7 +179,7 @@ function wrapOptionalTools(tools, toolOwners, telemetry) {
                             input: cloneUnknown(input),
                             error: cloneUnknown(error),
                         },
-                    });
+                    }));
                     throw error;
                 }
             },
@@ -182,16 +194,19 @@ export function createContextManagementRuntime(options) {
     const optionalTools = wrapOptionalTools(tools, toolOwners, options.telemetry);
     const middleware = {
         specificationVersion: "v3",
-        async transformParams({ params }) {
+        async transformParams({ params, model }) {
             const requestContext = extractRequestContext(params);
             if (!requestContext) {
                 return params;
             }
-            const state = new StrategyState(params, requestContext);
+            const state = new StrategyState(params, requestContext, {
+                provider: model.provider,
+                modelId: model.modelId,
+            });
             const initialPrompt = clonePrompt(state.prompt);
             const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
             const estimate = (prompt) => estimator.estimatePrompt(prompt) + toolTokenOverhead;
-            await emitTelemetry(options.telemetry, {
+            await emitTelemetry(options.telemetry, () => ({
                 type: "runtime-start",
                 requestContext,
                 strategyNames: strategies.map((strategy) => strategy.name ?? "unnamed-strategy"),
@@ -201,7 +216,7 @@ export function createContextManagementRuntime(options) {
                     prompt: initialPrompt,
                     providerOptions: cloneUnknown(params.providerOptions),
                 },
-            });
+            }));
             for (const strategy of strategies) {
                 const promptBefore = clonePrompt(state.prompt);
                 const removedBefore = state.removedToolExchanges.length;
@@ -215,7 +230,7 @@ export function createContextManagementRuntime(options) {
                 const changed = !promptsEqual(promptBefore, promptAfter)
                     || removedAfter !== removedBefore
                     || pinnedAfter !== pinnedBefore;
-                await emitTelemetry(options.telemetry, {
+                await emitTelemetry(options.telemetry, () => ({
                     type: "strategy-complete",
                     requestContext,
                     strategyName: strategy.name ?? "unnamed-strategy",
@@ -232,9 +247,9 @@ export function createContextManagementRuntime(options) {
                         promptAfter,
                         ...(execution?.payloads ? { strategy: cloneUnknown(execution.payloads) } : {}),
                     },
-                });
+                }));
             }
-            await emitTelemetry(options.telemetry, {
+            await emitTelemetry(options.telemetry, () => ({
                 type: "runtime-complete",
                 requestContext,
                 estimatedTokensBefore: estimate(initialPrompt),
@@ -245,7 +260,7 @@ export function createContextManagementRuntime(options) {
                     promptBefore: initialPrompt,
                     promptAfter: clonePrompt(state.prompt),
                 },
-            });
+            }));
             return state.params;
         },
     };

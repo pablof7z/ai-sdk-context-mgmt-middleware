@@ -6,6 +6,10 @@ export interface ContextManagementRequestContext {
     agentId: string;
     agentLabel?: string;
 }
+export interface ContextManagementModelRef {
+    provider: string;
+    modelId: string;
+}
 export interface RemovedToolExchange {
     toolCallId: string;
     toolName: string;
@@ -15,6 +19,7 @@ export interface ContextManagementStrategyState {
     readonly params: LanguageModelV3CallOptions;
     readonly prompt: LanguageModelV3Prompt;
     readonly requestContext: ContextManagementRequestContext;
+    readonly model?: ContextManagementModelRef;
     readonly removedToolExchanges: readonly RemovedToolExchange[];
     readonly pinnedToolCallIds: ReadonlySet<string>;
     updatePrompt(prompt: LanguageModelV3Prompt): void;
@@ -142,6 +147,14 @@ export interface ContextUtilizationReminderStrategyOptions {
     warningThresholdRatio?: number;
     estimator?: PromptTokenEstimator;
     mode?: "scratchpad" | "generic";
+}
+export interface ContextWindowStatusStrategyOptions {
+    workingTokenBudget?: number;
+    estimator?: PromptTokenEstimator;
+    getContextWindow?: (options: {
+        model?: ContextManagementModelRef;
+        requestContext: ContextManagementRequestContext;
+    }) => number | undefined;
 }
 export interface SummarizationStrategyOptions {
     summarize: (messages: LanguageModelV3Message[]) => Promise<string>;

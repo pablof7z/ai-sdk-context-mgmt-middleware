@@ -5,9 +5,21 @@ function cloneUnknown(value) {
         return value;
     }
     if (typeof structuredClone === "function") {
-        return structuredClone(value);
+        try {
+            return structuredClone(value);
+        }
+        catch {
+            return value;
+        }
     }
     return value;
+}
+function buildReminderSystemMessage(reminderText) {
+    return {
+        role: "system",
+        content: reminderText,
+        providerOptions: { contextManagement: { type: "reminder" } },
+    };
 }
 function cloneMessage(message) {
     if (message.role === "system") {
@@ -373,11 +385,7 @@ export function appendReminderToLatestUserMessage(prompt, reminderText) {
         };
         return cloned;
     }
-    return [
-        ...cloned,
-        {
-            role: "user",
-            content: [{ type: "text", text: reminderText }],
-        },
-    ];
+    const insertIndex = cloned.reduce((lastIndex, message, index) => (message.role === "system" ? index : lastIndex), -1) + 1;
+    cloned.splice(insertIndex, 0, buildReminderSystemMessage(reminderText));
+    return cloned;
 }
