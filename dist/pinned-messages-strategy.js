@@ -81,5 +81,12 @@ export class PinnedMessagesStrategy {
         if (pinnedIds.length > 0) {
             state.addPinnedToolCallIds(pinnedIds);
         }
+        return {
+            reason: pinnedIds.length > 0 ? "pinned-tool-results-loaded" : "no-pinned-tool-results",
+            payloads: {
+                pinnedToolCallIds: pinnedIds,
+                maxPinned: this.maxPinned,
+            },
+        };
     }
 }

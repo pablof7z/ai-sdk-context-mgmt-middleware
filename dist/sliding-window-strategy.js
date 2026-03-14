@@ -19,5 +19,13 @@ export class SlidingWindowStrategy {
         });
         state.updatePrompt(result.prompt);
         state.addRemovedToolExchanges(result.removedToolExchanges);
+        return {
+            reason: result.removedToolExchanges.length > 0 ? "tail-trimmed" : "window-evaluated",
+            workingTokenBudget: this.maxPromptTokens,
+            payloads: {
+                keepLastMessages: this.keepLastMessages,
+                maxPromptTokens: this.maxPromptTokens,
+            },
+        };
     }
 }

@@ -96,7 +96,7 @@ describe("ScratchpadStrategy", () => {
       addPinnedToolCallIds() {},
     };
 
-    await strategy.apply(state as any);
+    const result = await strategy.apply(state as any);
 
     expect(
       state.prompt.some((message: any) =>
@@ -123,6 +123,19 @@ describe("ScratchpadStrategy", () => {
     expect(reminderText).toContain("Removed tool exchanges:");
     expect(reminderText).toContain("fs_read (call-old)");
     expect(reminderText).toContain("and 1 more");
+    expect(reminderText).toContain("You can update these notes or future omissions with scratchpad(...).");
+    expect(reminderText).not.toContain("Use scratchpad(...) now");
+    expect(result).toEqual({
+      reason: "scratchpad-rendered",
+      payloads: expect.objectContaining({
+        currentState: expect.objectContaining({
+          notes: "Keep the working set tight.",
+        }),
+        appliedOmitToolCallIds: ["call-old", "call-older"],
+        reminderTone: "informational",
+        reminderText: expect.stringContaining("You can update these notes"),
+      }),
+    });
   });
 
   test("keepLastMessages only shrinks the current prompt", async () => {

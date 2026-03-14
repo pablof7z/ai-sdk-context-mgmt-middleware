@@ -8,6 +8,7 @@ import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 import type {
   ContextManagementRequestContext,
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   ScratchpadConversationEntry,
   ScratchpadState,
@@ -104,6 +105,7 @@ function buildReminderBlock(options: {
   currentContext: ContextManagementRequestContext;
   otherScratchpads: ScratchpadConversationEntry[];
   removedToolExchanges: readonly { toolCallId: string; toolName: string }[];
+  reminderTone: "informational" | "urgent" | "silent";
   maxRemovedToolReminderItems: number;
 }): string {
   const {
@@ -111,6 +113,7 @@ function buildReminderBlock(options: {
     currentContext,
     otherScratchpads,
     removedToolExchanges,
+    reminderTone,
     maxRemovedToolReminderItems,
   } = options;
 
@@ -147,7 +150,11 @@ function buildReminderBlock(options: {
     }
   }
 
-  lines.push("Use scratchpad(...) to update notes or proactively remove more context.");
+  if (reminderTone === "informational") {
+    lines.push("You can update these notes or future omissions with scratchpad(...).");
+  } else if (reminderTone === "urgent") {
+    lines.push("Use scratchpad(...) now to preserve progress or proactively remove stale context.");
+  }
   lines.push("[/Context management]");
   return lines.join("\n");
 }
@@ -155,11 +162,13 @@ function buildReminderBlock(options: {
 export class ScratchpadStrategy implements ContextManagementStrategy {
   readonly name = "scratchpad";
   private readonly scratchpadStore: ScratchpadStore;
+  private readonly reminderTone: "informational" | "urgent" | "silent";
   private readonly maxRemovedToolReminderItems: number;
   private readonly optionalTools: ToolSet;
 
   constructor(options: ScratchpadStrategyOptions) {
     this.scratchpadStore = options.scratchpadStore;
+    this.reminderTone = options.reminderTone ?? "informational";
     this.maxRemovedToolReminderItems =
       options.maxRemovedToolReminderItems ?? DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS;
     this.optionalTools = {
@@ -229,7 +238,7 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
     return this.optionalTools;
   }
 
-  async apply(state: ContextManagementStrategyState): Promise<void> {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const [currentStateRaw, allScratchpadsRaw] = await Promise.all([
       this.scratchpadStore.get(buildScratchpadKey(state.requestContext)),
       this.scratchpadStore.listConversation(state.requestContext.conversationId),
@@ -239,11 +248,13 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
     const allScratchpads = (allScratchpadsRaw ?? []).filter(
       (entry) => entry.agentId !== state.requestContext.agentId
     );
+    let appliedOmitToolCallIds: string[] = [];
 
     if (currentState.omitToolCallIds.length > 0) {
       const omitToolCallIds = currentState.omitToolCallIds.filter(
         (toolCallId) => !state.pinnedToolCallIds.has(toolCallId)
       );
+      appliedOmitToolCallIds = omitToolCallIds;
       const omissionResult = removeToolExchanges(
         state.prompt,
         omitToolCallIds,
@@ -271,9 +282,22 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
       currentContext: state.requestContext,
       otherScratchpads: allScratchpads,
       removedToolExchanges: state.removedToolExchanges,
+      reminderTone: this.reminderTone,
       maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
     });
 
     state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
+
+    return {
+      reason: "scratchpad-rendered",
+      payloads: {
+        currentState,
+        otherScratchpads: allScratchpads,
+        appliedOmitToolCallIds,
+        appliedKeepLastMessages: currentState.keepLastMessages,
+        reminderTone: this.reminderTone,
+        reminderText: reminderBlock,
+      },
+    };
   }
 }

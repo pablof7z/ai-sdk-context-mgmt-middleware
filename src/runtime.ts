@@ -1,12 +1,17 @@
-import type { LanguageModelV3CallOptions, LanguageModelV3Middleware } from "@ai-sdk/provider";
+import type { LanguageModelV3CallOptions, LanguageModelV3Middleware, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import type { ToolSet } from "ai";
 import { clonePrompt, extractRequestContext } from "./prompt-utils.js";
+import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
+import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 import type {
   ContextManagementRequestContext,
   ContextManagementRuntime,
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
+  ContextManagementTelemetrySink,
   CreateContextManagementRuntimeOptions,
+  PromptTokenEstimator,
   RemovedToolExchange,
 } from "./types.js";
 
@@ -61,8 +66,78 @@ class StrategyState implements ContextManagementStrategyState {
   }
 }
 
-function mergeOptionalTools(strategies: readonly ContextManagementStrategy[]): ToolSet {
+function cloneUnknown<T>(value: T): T {
+  if (value === undefined || value === null) {
+    return value;
+  }
+
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+
+  return value;
+}
+
+function promptsEqual(a: LanguageModelV3Prompt, b: LanguageModelV3Prompt): boolean {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function extractRequestContextFromExperimentalContext(
+  experimentalContext: unknown
+): ContextManagementRequestContext | null {
+  if (
+    !experimentalContext ||
+    typeof experimentalContext !== "object" ||
+    !(CONTEXT_MANAGEMENT_KEY in experimentalContext)
+  ) {
+    return null;
+  }
+
+  const raw = (experimentalContext as Record<string, unknown>)[CONTEXT_MANAGEMENT_KEY];
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const conversationId = (raw as Record<string, unknown>).conversationId;
+  const agentId = (raw as Record<string, unknown>).agentId;
+  const agentLabel = (raw as Record<string, unknown>).agentLabel;
+
+  if (typeof conversationId !== "string" || conversationId.length === 0) {
+    return null;
+  }
+
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    return null;
+  }
+
+  return {
+    conversationId,
+    agentId,
+    ...(typeof agentLabel === "string" && agentLabel.length > 0 ? { agentLabel } : {}),
+  };
+}
+
+async function emitTelemetry(
+  telemetry: ContextManagementTelemetrySink | undefined,
+  event: Parameters<ContextManagementTelemetrySink>[0]
+): Promise<void> {
+  if (!telemetry) {
+    return;
+  }
+
+  await telemetry(event);
+}
+
+function mergeOptionalTools(strategies: readonly ContextManagementStrategy[]): {
+  tools: ToolSet;
+  toolOwners: Map<string, string>;
+} {
   const merged = {} as ToolSet;
+  const toolOwners = new Map<string, string>();
 
   for (const strategy of strategies) {
     const tools = strategy.getOptionalTools?.();
@@ -76,17 +151,89 @@ function mergeOptionalTools(strategies: readonly ContextManagementStrategy[]): T
       }
 
       merged[toolName] = toolDefinition;
+      toolOwners.set(toolName, strategy.name ?? "unnamed-strategy");
     }
   }
 
-  return merged;
+  return {
+    tools: merged,
+    toolOwners,
+  };
+}
+
+function wrapOptionalTools(
+  tools: ToolSet,
+  toolOwners: Map<string, string>,
+  telemetry: ContextManagementTelemetrySink | undefined
+): ToolSet {
+  const wrapped = {} as ToolSet;
+
+  for (const [toolName, toolDefinition] of Object.entries(tools)) {
+    const strategyName = toolOwners.get(toolName);
+    const execute = (toolDefinition as { execute?: (...args: unknown[]) => unknown }).execute;
+
+    if (!execute) {
+      wrapped[toolName] = toolDefinition;
+      continue;
+    }
+
+    wrapped[toolName] = {
+      ...toolDefinition,
+      execute: async (input: unknown, options: { toolCallId?: string; experimental_context?: unknown }) => {
+        const requestContext = extractRequestContextFromExperimentalContext(options.experimental_context);
+        await emitTelemetry(telemetry, {
+          type: "tool-execute-start",
+          toolName,
+          strategyName,
+          toolCallId: options.toolCallId,
+          requestContext,
+          payloads: {
+            input: cloneUnknown(input),
+          },
+        });
+
+        try {
+          const result = await execute(input, options);
+          await emitTelemetry(telemetry, {
+            type: "tool-execute-complete",
+            toolName,
+            strategyName,
+            toolCallId: options.toolCallId,
+            requestContext,
+            payloads: {
+              input: cloneUnknown(input),
+              result: cloneUnknown(result),
+            },
+          });
+          return result;
+        } catch (error) {
+          await emitTelemetry(telemetry, {
+            type: "tool-execute-error",
+            toolName,
+            strategyName,
+            toolCallId: options.toolCallId,
+            requestContext,
+            payloads: {
+              input: cloneUnknown(input),
+              error: cloneUnknown(error),
+            },
+          });
+          throw error;
+        }
+      },
+    };
+  }
+
+  return wrapped;
 }
 
 export function createContextManagementRuntime(
   options: CreateContextManagementRuntimeOptions
 ): ContextManagementRuntime {
   const strategies = [...options.strategies];
-  const optionalTools = mergeOptionalTools(strategies);
+  const estimator: PromptTokenEstimator = options.estimator ?? createDefaultPromptTokenEstimator();
+  const { tools, toolOwners } = mergeOptionalTools(strategies);
+  const optionalTools = wrapOptionalTools(tools, toolOwners, options.telemetry);
   const middleware: LanguageModelV3Middleware = {
     specificationVersion: "v3",
     async transformParams({ params }) {
@@ -97,10 +244,66 @@ export function createContextManagementRuntime(
       }
 
       const state = new StrategyState(params, requestContext);
+      const initialPrompt = clonePrompt(state.prompt);
+
+      await emitTelemetry(options.telemetry, {
+        type: "runtime-start",
+        requestContext,
+        strategyNames: strategies.map((strategy) => strategy.name ?? "unnamed-strategy"),
+        optionalToolNames: Object.keys(optionalTools),
+        estimatedTokensBefore: estimator.estimatePrompt(initialPrompt),
+        payloads: {
+          prompt: initialPrompt,
+          providerOptions: cloneUnknown(params.providerOptions),
+        },
+      });
 
       for (const strategy of strategies) {
-        await strategy.apply(state);
+        const promptBefore = clonePrompt(state.prompt);
+        const removedBefore = state.removedToolExchanges.length;
+        const pinnedBefore = state.pinnedToolCallIds.size;
+        const estimatedTokensBefore = estimator.estimatePrompt(promptBefore);
+        const execution: ContextManagementStrategyExecution | void = await strategy.apply(state);
+        const promptAfter = clonePrompt(state.prompt);
+        const estimatedTokensAfter = estimator.estimatePrompt(promptAfter);
+        const removedAfter = state.removedToolExchanges.length;
+        const pinnedAfter = state.pinnedToolCallIds.size;
+        const changed = !promptsEqual(promptBefore, promptAfter)
+          || removedAfter !== removedBefore
+          || pinnedAfter !== pinnedBefore;
+
+        await emitTelemetry(options.telemetry, {
+          type: "strategy-complete",
+          requestContext,
+          strategyName: strategy.name ?? "unnamed-strategy",
+          outcome: execution?.outcome ?? (changed ? "applied" : "skipped"),
+          reason: execution?.reason ?? (changed ? "state-changed" : "no-op"),
+          estimatedTokensBefore,
+          estimatedTokensAfter,
+          workingTokenBudget: execution?.workingTokenBudget,
+          removedToolExchangesDelta: removedAfter - removedBefore,
+          removedToolExchangesTotal: removedAfter,
+          pinnedToolCallIdsDelta: pinnedAfter - pinnedBefore,
+          payloads: {
+            promptBefore,
+            promptAfter,
+            ...(execution?.payloads ? { strategy: cloneUnknown(execution.payloads) } : {}),
+          },
+        });
       }
+
+      await emitTelemetry(options.telemetry, {
+        type: "runtime-complete",
+        requestContext,
+        estimatedTokensBefore: estimator.estimatePrompt(initialPrompt),
+        estimatedTokensAfter: estimator.estimatePrompt(state.prompt),
+        removedToolExchangesTotal: state.removedToolExchanges.length,
+        pinnedToolCallIdsTotal: state.pinnedToolCallIds.size,
+        payloads: {
+          promptBefore: initialPrompt,
+          promptAfter: clonePrompt(state.prompt),
+        },
+      });
 
       return state.params;
     },

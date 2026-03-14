@@ -1,20 +1,51 @@
 import { simulateReadableStream, stepCountIs, streamText, wrapLanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import {
+  ContextUtilizationReminderStrategy,
+  SummarizationStrategy,
+  ToolResultDecayStrategy,
   createContextManagementRuntime,
   ScratchpadStrategy,
-  SlidingWindowStrategy,
+  type ContextManagementTelemetryEvent,
 } from "../index.js";
 import { InMemoryScratchpadStore, usage } from "./helpers.js";
 
 describe("context management runtime integration", () => {
-  test("scratchpad tool updates future prompt projection in streamText", async () => {
+  test("composed runtime applies scratchpad updates and later emits warning telemetry", async () => {
     const store = new InMemoryScratchpadStore();
+    const events: ContextManagementTelemetryEvent[] = [];
+    const estimator = {
+      estimateMessage: () => 40,
+      estimatePrompt: () => 80,
+    };
     const runtime = createContextManagementRuntime({
       strategies: [
-        new SlidingWindowStrategy({ keepLastMessages: 4 }),
-        new ScratchpadStrategy({ scratchpadStore: store }),
+        new ToolResultDecayStrategy({
+          keepFullResultCount: 0,
+          truncateWindowCount: 0,
+          maxPromptTokens: 60,
+          estimator,
+        }),
+        new SummarizationStrategy({
+          summarize: async () => "older context summary",
+          maxPromptTokens: 90,
+          estimator,
+        }),
+        new ScratchpadStrategy({
+          scratchpadStore: store,
+          reminderTone: "informational",
+        }),
+        new ContextUtilizationReminderStrategy({
+          workingTokenBudget: 100,
+          warningThresholdRatio: 0.7,
+          mode: "scratchpad",
+          estimator,
+        }),
       ],
+      telemetry: async (event) => {
+        events.push(event);
+      },
+      estimator,
     });
 
     let callCount = 0;
@@ -112,5 +143,11 @@ describe("context management runtime integration", () => {
       )
     ).toBe(false);
     expect(JSON.stringify(secondPrompt)).toContain("Track parser follow-up");
+    expect(JSON.stringify(secondPrompt)).toContain("Use scratchpad(...) now");
+    expect(events.some((event) =>
+      event.type === "strategy-complete" &&
+      event.strategyName === "context-utilization-reminder" &&
+      event.reason === "warning-injected"
+    )).toBe(true);
   });
 });

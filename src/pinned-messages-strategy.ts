@@ -2,6 +2,7 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 import type {
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   PinnedMessagesStrategyOptions,
   PinnedStore,
@@ -103,12 +104,20 @@ export class PinnedMessagesStrategy implements ContextManagementStrategy {
     return this.optionalTools;
   }
 
-  async apply(state: ContextManagementStrategyState): Promise<void> {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const key = buildPinnedKey(state.requestContext);
     const pinnedIds = (await this.pinnedStore.get(key)) ?? [];
 
     if (pinnedIds.length > 0) {
       state.addPinnedToolCallIds(pinnedIds);
     }
+
+    return {
+      reason: pinnedIds.length > 0 ? "pinned-tool-results-loaded" : "no-pinned-tool-results",
+      payloads: {
+        pinnedToolCallIds: pinnedIds,
+        maxPinned: this.maxPinned,
+      },
+    };
   }
 }

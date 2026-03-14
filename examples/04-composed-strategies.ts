@@ -1,11 +1,8 @@
 /**
- * Composed Strategies — Multiple strategies in a single pipeline
+ * Composed Strategies — Graduated context management with telemetry
  *
- * Combines SlidingWindow + ToolResultDecay + SystemPromptCaching to show
- * how strategies compose. Each one transforms the prompt in sequence:
- *   1. SlidingWindow drops the oldest messages
- *   2. ToolResultDecay compresses old tool results in what remains
- *   3. SystemPromptCaching consolidates system messages for cache efficiency
+ * Combines SystemPromptCaching + ToolResultDecay + Summarization +
+ * Scratchpad + ContextUtilizationReminder to show a graduated stack.
  *
  * Requires: ollama running locally with qwen2.5:3b pulled
  */
@@ -13,8 +10,11 @@ import { generateText, wrapLanguageModel, type ModelMessage } from "ai";
 import type { LanguageModelV3Middleware, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import { ollama } from "ollama-ai-provider-v2";
 import {
+  ContextUtilizationReminderStrategy,
+  ScratchpadStrategy,
+  SummarizationStrategy,
+  createDefaultPromptTokenEstimator,
   createContextManagementRuntime,
-  SlidingWindowStrategy,
   SystemPromptCachingStrategy,
   ToolResultDecayStrategy,
 } from "ai-sdk-context-management";
@@ -25,17 +25,53 @@ const CONTEXT_OPTIONS = {
 };
 
 async function main() {
+  const scratchpads = new Map<string, any>();
+  const estimator = createDefaultPromptTokenEstimator();
   const runtime = createContextManagementRuntime({
     strategies: [
-      new SlidingWindowStrategy({ keepLastMessages: 8 }),
+      new SystemPromptCachingStrategy({ consolidateSystemMessages: true }),
       new ToolResultDecayStrategy({
+        maxPromptTokens: 300,
         keepFullResultCount: 1,
         truncateWindowCount: 1,
         truncatedMaxTokens: 25,
         placeholder: "[omitted]",
+        estimator,
       }),
-      new SystemPromptCachingStrategy({ consolidateSystemMessages: true }),
+      new SummarizationStrategy({
+        summarize: async (messages) => `Summary of ${messages.length} older messages`,
+        maxPromptTokens: 420,
+        keepLastMessages: 6,
+        estimator,
+      }),
+      new ScratchpadStrategy({
+        scratchpadStore: {
+          get: ({ conversationId, agentId }) => scratchpads.get(`${conversationId}:${agentId}`),
+          set: ({ conversationId, agentId }, state) => {
+            scratchpads.set(`${conversationId}:${agentId}`, state);
+          },
+          listConversation: (conversationId) =>
+            [...scratchpads.entries()]
+              .filter(([key]) => key.startsWith(`${conversationId}:`))
+              .map(([key, state]) => ({
+                agentId: key.split(":")[1],
+                agentLabel: state.agentLabel,
+                state,
+              })),
+        },
+        reminderTone: "informational",
+      }),
+      new ContextUtilizationReminderStrategy({
+        workingTokenBudget: 500,
+        warningThresholdRatio: 0.7,
+        mode: "scratchpad",
+        estimator,
+      }),
     ],
+    estimator,
+    telemetry: async (event) => {
+      console.log(`[telemetry:${event.type}]`, JSON.stringify(event, null, 2));
+    },
   });
 
   // Capture transformed prompt
@@ -102,7 +138,7 @@ async function main() {
   ];
 
   console.log(`=== Full conversation: ${messages.length} messages (3 tool exchanges) ===`);
-  console.log("Pipeline: SlidingWindow(8) -> ToolResultDecay(full=1, trunc=1) -> SystemPromptCaching\n");
+  console.log("Pipeline: SystemPromptCaching -> ToolResultDecay -> Summarization -> Scratchpad -> UtilizationWarning\n");
 
   const result = await generateText({
     model,
@@ -113,9 +149,11 @@ async function main() {
   printPrompt("What the model received after all 3 strategies", capturedPrompts[0]);
 
   console.log("\n=== Strategy effects ===");
-  console.log("1. SlidingWindow(8): kept last 8 non-system messages (some early turns may be dropped)");
-  console.log("2. ToolResultDecay: t1 -> [omitted], t2 -> truncated, t3 -> full");
-  console.log("3. SystemPromptCaching: system messages consolidated into one for cache efficiency");
+  console.log("1. SystemPromptCaching: system messages consolidated into one for cache efficiency");
+  console.log("2. ToolResultDecay: older tool results are compressed before bigger fallbacks kick in");
+  console.log("3. Summarization: only used if the prompt is still too large after decay");
+  console.log("4. Scratchpad: always renders agent notes / omitted exchanges");
+  console.log("5. UtilizationWarning: warns when the working budget is getting tight");
 
   console.log(`\n=== Model's response ===`);
   console.log(result.text);

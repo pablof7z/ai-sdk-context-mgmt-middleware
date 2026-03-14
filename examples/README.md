@@ -13,18 +13,28 @@ Then run:
 
 ```bash
 npx tsx 01-sliding-window.ts
-npx tsx 02-scratchpad.ts
+npx tsx 02-tool-result-decay.ts
+npx tsx 03-summarization.ts
+npx tsx 04-composed-strategies.ts
 ```
 
 ## Examples
 
 ### `01-sliding-window.ts`
 
-- wraps a mock model with `SlidingWindowStrategy`
-- shows the prompt that reaches the provider after trimming
+- shows the legacy sliding-window strategy in isolation
 
-### `02-scratchpad.ts`
+### `02-tool-result-decay.ts`
 
-- wraps a mock model with both strategies
-- lets the model call the returned `scratchpad` tool
-- shows the updated scratchpad state and the next-step prompt
+- shows progressive compression of older tool outputs
+- keeps the reasoning/tool-call chain intact while shrinking result payloads
+
+### `03-summarization.ts`
+
+- shows fallback summarization once a prompt exceeds a configured token budget
+- keeps the recent tail raw and compresses only older history
+
+### `04-composed-strategies.ts`
+
+- composes caching, decay, summarization, and reminders into one pipeline
+- demonstrates the telemetry callback so hosts can inspect runtime decisions

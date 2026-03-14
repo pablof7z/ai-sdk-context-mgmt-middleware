@@ -61,7 +61,7 @@ function extractRequestContextFromExperimentalContext(experimentalContext) {
     };
 }
 function buildReminderBlock(options) {
-    const { currentState, currentContext, otherScratchpads, removedToolExchanges, maxRemovedToolReminderItems, } = options;
+    const { currentState, currentContext, otherScratchpads, removedToolExchanges, reminderTone, maxRemovedToolReminderItems, } = options;
     const lines = [
         "[Context management]",
         `Your scratchpad (${currentContext.agentLabel ?? currentContext.agentId}):`,
@@ -90,17 +90,24 @@ function buildReminderBlock(options) {
             lines.push(`and ${overflow} more`);
         }
     }
-    lines.push("Use scratchpad(...) to update notes or proactively remove more context.");
+    if (reminderTone === "informational") {
+        lines.push("You can update these notes or future omissions with scratchpad(...).");
+    }
+    else if (reminderTone === "urgent") {
+        lines.push("Use scratchpad(...) now to preserve progress or proactively remove stale context.");
+    }
     lines.push("[/Context management]");
     return lines.join("\n");
 }
 export class ScratchpadStrategy {
     name = "scratchpad";
     scratchpadStore;
+    reminderTone;
     maxRemovedToolReminderItems;
     optionalTools;
     constructor(options) {
         this.scratchpadStore = options.scratchpadStore;
+        this.reminderTone = options.reminderTone ?? "informational";
         this.maxRemovedToolReminderItems =
             options.maxRemovedToolReminderItems ?? DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS;
         this.optionalTools = {
@@ -170,8 +177,10 @@ export class ScratchpadStrategy {
         ]);
         const currentState = normalizeScratchpadState(currentStateRaw, state.requestContext.agentLabel);
         const allScratchpads = (allScratchpadsRaw ?? []).filter((entry) => entry.agentId !== state.requestContext.agentId);
+        let appliedOmitToolCallIds = [];
         if (currentState.omitToolCallIds.length > 0) {
             const omitToolCallIds = currentState.omitToolCallIds.filter((toolCallId) => !state.pinnedToolCallIds.has(toolCallId));
+            appliedOmitToolCallIds = omitToolCallIds;
             const omissionResult = removeToolExchanges(state.prompt, omitToolCallIds, "scratchpad");
             state.updatePrompt(omissionResult.prompt);
             state.addRemovedToolExchanges(omissionResult.removedToolExchanges);
@@ -188,8 +197,20 @@ export class ScratchpadStrategy {
             currentContext: state.requestContext,
             otherScratchpads: allScratchpads,
             removedToolExchanges: state.removedToolExchanges,
+            reminderTone: this.reminderTone,
             maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
         });
         state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
+        return {
+            reason: "scratchpad-rendered",
+            payloads: {
+                currentState,
+                otherScratchpads: allScratchpads,
+                appliedOmitToolCallIds,
+                appliedKeepLastMessages: currentState.keepLastMessages,
+                reminderTone: this.reminderTone,
+                reminderText: reminderBlock,
+            },
+        };
     }
 }

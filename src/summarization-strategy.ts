@@ -6,6 +6,7 @@ import {
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   PromptTokenEstimator,
   RemovedToolExchange,
@@ -37,11 +38,18 @@ export class SummarizationStrategy implements ContextManagementStrategy {
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
   }
 
-  async apply(state: ContextManagementStrategyState): Promise<void> {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const estimatedTokens = this.estimator.estimatePrompt(state.prompt);
 
     if (estimatedTokens <= this.maxPromptTokens) {
-      return;
+      return {
+        reason: "below-token-threshold",
+        workingTokenBudget: this.maxPromptTokens,
+        payloads: {
+          estimatedTokens,
+          keepLastMessages: this.keepLastMessages,
+        },
+      };
     }
 
     const prompt = state.prompt;
@@ -56,7 +64,15 @@ export class SummarizationStrategy implements ContextManagementStrategy {
     );
 
     if (summarizableMessages.length === 0) {
-      return;
+      return {
+        reason: "no-summarizable-messages",
+        workingTokenBudget: this.maxPromptTokens,
+        payloads: {
+          estimatedTokens,
+          keepLastMessages: this.keepLastMessages,
+          preservedMessageCount: preservedMessages.length,
+        },
+      };
     }
 
     const existingSummaryIndex = systemMessages.findIndex(isSummaryMessage);
@@ -99,5 +115,16 @@ export class SummarizationStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(newPrompt);
     state.addRemovedToolExchanges(removedExchanges);
+
+    return {
+      reason: "history-summarized",
+      workingTokenBudget: this.maxPromptTokens,
+      payloads: {
+        estimatedTokens,
+        keepLastMessages: this.keepLastMessages,
+        messagesToSummarize,
+        summaryText,
+      },
+    };
   }
 }

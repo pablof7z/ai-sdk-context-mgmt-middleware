@@ -12,6 +12,7 @@ import type {
   CompactionToolStrategyOptions,
   ContextManagementRequestContext,
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   RemovedToolExchange,
 } from "./types.js";
@@ -135,7 +136,7 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
     return this.optionalTools;
   }
 
-  async apply(state: ContextManagementStrategyState): Promise<void> {
+  async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const requestKey = buildCompactionRequestKey(state.requestContext);
     const hasPendingCompaction = this.pendingCompactionKeys.has(requestKey);
 
@@ -155,11 +156,19 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
         const insertIndex = lastSystemIndex + 1;
         cloned.splice(insertIndex, 0, buildSummarySystemMessage(storedSummary));
         state.updatePrompt(cloned);
+        return {
+          reason: "stored-compaction-summary-injected",
+          payloads: {
+            storedSummary,
+          },
+        };
       }
     }
 
     if (!hasPendingCompaction) {
-      return;
+      return {
+        reason: "no-compaction-requested",
+      };
     }
 
     const {
@@ -174,7 +183,12 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
 
     if (summarizableMessages.length === 0) {
       this.pendingCompactionKeys.delete(requestKey);
-      return;
+      return {
+        reason: "no-summarizable-messages",
+        payloads: {
+          keepLastMessages: this.keepLastMessages,
+        },
+      };
     }
 
     const existingSummaryIndex = systemMessages.findIndex(isCompactionSummaryMessage);
@@ -203,5 +217,14 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(nextPrompt);
     this.pendingCompactionKeys.delete(requestKey);
+
+    return {
+      reason: "context-compacted",
+      payloads: {
+        keepLastMessages: this.keepLastMessages,
+        messagesToSummarize,
+        summaryText,
+      },
+    };
   }
 }

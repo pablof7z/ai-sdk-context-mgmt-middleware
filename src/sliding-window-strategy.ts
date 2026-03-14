@@ -2,6 +2,7 @@ import { trimPromptToLastMessages } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   SlidingWindowStrategyOptions,
 } from "./types.js";
@@ -20,7 +21,7 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
   }
 
-  apply(state: ContextManagementStrategyState): void {
+  apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
     const result = trimPromptToLastMessages(
       state.prompt,
       this.keepLastMessages,
@@ -34,5 +35,14 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(result.prompt);
     state.addRemovedToolExchanges(result.removedToolExchanges);
+
+    return {
+      reason: result.removedToolExchanges.length > 0 ? "tail-trimmed" : "window-evaluated",
+      workingTokenBudget: this.maxPromptTokens,
+      payloads: {
+        keepLastMessages: this.keepLastMessages,
+        maxPromptTokens: this.maxPromptTokens,
+      },
+    };
   }
 }

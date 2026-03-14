@@ -22,12 +22,27 @@ export class SummarizationStrategy {
     async apply(state) {
         const estimatedTokens = this.estimator.estimatePrompt(state.prompt);
         if (estimatedTokens <= this.maxPromptTokens) {
-            return;
+            return {
+                reason: "below-token-threshold",
+                workingTokenBudget: this.maxPromptTokens,
+                payloads: {
+                    estimatedTokens,
+                    keepLastMessages: this.keepLastMessages,
+                },
+            };
         }
         const prompt = state.prompt;
         const { systemMessages, summarizableMessages, preservedMessages, } = partitionPromptForSummarization(prompt, this.keepLastMessages, state.pinnedToolCallIds);
         if (summarizableMessages.length === 0) {
-            return;
+            return {
+                reason: "no-summarizable-messages",
+                workingTokenBudget: this.maxPromptTokens,
+                payloads: {
+                    estimatedTokens,
+                    keepLastMessages: this.keepLastMessages,
+                    preservedMessageCount: preservedMessages.length,
+                },
+            };
         }
         const existingSummaryIndex = systemMessages.findIndex(isSummaryMessage);
         const existingSummary = existingSummaryIndex !== -1 ? systemMessages[existingSummaryIndex] : null;
@@ -62,5 +77,15 @@ export class SummarizationStrategy {
         }
         state.updatePrompt(newPrompt);
         state.addRemovedToolExchanges(removedExchanges);
+        return {
+            reason: "history-summarized",
+            workingTokenBudget: this.maxPromptTokens,
+            payloads: {
+                estimatedTokens,
+                keepLastMessages: this.keepLastMessages,
+                messagesToSummarize,
+                summaryText,
+            },
+        };
     }
 }

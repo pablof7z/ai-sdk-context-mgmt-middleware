@@ -1,4 +1,4 @@
-import type { ContextManagementStrategy, ContextManagementStrategyState, SummarizationStrategyOptions } from "./types.js";
+import type { ContextManagementStrategy, ContextManagementStrategyExecution, ContextManagementStrategyState, SummarizationStrategyOptions } from "./types.js";
 export declare class SummarizationStrategy implements ContextManagementStrategy {
     readonly name = "summarization";
     private readonly summarize;
@@ -6,5 +6,5 @@ export declare class SummarizationStrategy implements ContextManagementStrategy 
     private readonly keepLastMessages;
     private readonly estimator;
     constructor(options: SummarizationStrategyOptions);
-    apply(state: ContextManagementStrategyState): Promise<void>;
+    apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;
 }

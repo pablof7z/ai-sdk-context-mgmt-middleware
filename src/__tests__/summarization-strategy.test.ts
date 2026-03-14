@@ -70,7 +70,7 @@ describe("SummarizationStrategy", () => {
     ];
 
     const state = createMockState(prompt);
-    await strategy.apply(state);
+    const result = await strategy.apply(state);
 
     expect(calls).toHaveLength(0);
     // Prompt unchanged (same references since updatePrompt was never called)
@@ -97,7 +97,7 @@ describe("SummarizationStrategy", () => {
     ];
 
     const state = createMockState(prompt);
-    await strategy.apply(state);
+    const result = await strategy.apply(state);
 
     expect(calls).toHaveLength(1);
     // 6 non-system messages total, keepLastMessages=2, so 4 messages summarized
@@ -111,6 +111,16 @@ describe("SummarizationStrategy", () => {
     expect(state.prompt[1].content).toBe("summary of 4 messages");
     expect(state.prompt[2].role).toBe("user");
     expect(state.prompt[3].role).toBe("assistant");
+    expect(result).toEqual({
+      reason: "history-summarized",
+      workingTokenBudget: 200,
+      payloads: expect.objectContaining({
+        estimatedTokens: 700,
+        keepLastMessages: 2,
+        messagesToSummarize: expect.any(Array),
+        summaryText: "summary of 4 messages",
+      }),
+    });
   });
 
   test("keeps tail messages intact", async () => {

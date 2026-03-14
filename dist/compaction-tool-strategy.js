@@ -106,15 +106,28 @@ export class CompactionToolStrategy {
                 const insertIndex = lastSystemIndex + 1;
                 cloned.splice(insertIndex, 0, buildSummarySystemMessage(storedSummary));
                 state.updatePrompt(cloned);
+                return {
+                    reason: "stored-compaction-summary-injected",
+                    payloads: {
+                        storedSummary,
+                    },
+                };
             }
         }
         if (!hasPendingCompaction) {
-            return;
+            return {
+                reason: "no-compaction-requested",
+            };
         }
         const { systemMessages, summarizableMessages, preservedMessages, } = partitionPromptForSummarization(state.prompt, this.keepLastMessages, state.pinnedToolCallIds);
         if (summarizableMessages.length === 0) {
             this.pendingCompactionKeys.delete(requestKey);
-            return;
+            return {
+                reason: "no-summarizable-messages",
+                payloads: {
+                    keepLastMessages: this.keepLastMessages,
+                },
+            };
         }
         const existingSummaryIndex = systemMessages.findIndex(isCompactionSummaryMessage);
         const existingSummary = existingSummaryIndex === -1 ? null : systemMessages[existingSummaryIndex];
@@ -137,5 +150,13 @@ export class CompactionToolStrategy {
         }
         state.updatePrompt(nextPrompt);
         this.pendingCompactionKeys.delete(requestKey);
+        return {
+            reason: "context-compacted",
+            payloads: {
+                keepLastMessages: this.keepLastMessages,
+                messagesToSummarize,
+                summaryText,
+            },
+        };
     }
 }

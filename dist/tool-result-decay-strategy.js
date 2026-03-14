@@ -22,13 +22,32 @@ export class ToolResultDecayStrategy {
         this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
     }
     apply(state) {
+        const currentPromptTokens = this.estimator.estimatePrompt(state.prompt);
         if (this.maxPromptTokens !== undefined &&
-            this.estimator.estimatePrompt(state.prompt) <= this.maxPromptTokens) {
-            return;
+            currentPromptTokens <= this.maxPromptTokens) {
+            return {
+                reason: "below-token-threshold",
+                workingTokenBudget: this.maxPromptTokens,
+                payloads: {
+                    currentPromptTokens,
+                    keepFullResultCount: this.keepFullResultCount,
+                    truncateWindowCount: this.truncateWindowCount,
+                    truncatedMaxTokens: this.truncatedMaxTokens,
+                },
+            };
         }
         const exchanges = collectToolExchanges(state.prompt);
         if (exchanges.size === 0) {
-            return;
+            return {
+                reason: "no-tool-exchanges",
+                workingTokenBudget: this.maxPromptTokens,
+                payloads: {
+                    currentPromptTokens,
+                    keepFullResultCount: this.keepFullResultCount,
+                    truncateWindowCount: this.truncateWindowCount,
+                    truncatedMaxTokens: this.truncatedMaxTokens,
+                },
+            };
         }
         // Sort exchanges by their result message position, most recent last.
         // Use the maximum result message index for ordering.
@@ -62,7 +81,16 @@ export class ToolResultDecayStrategy {
             }
         }
         if (truncateIds.size === 0 && placeholderIds.size === 0) {
-            return;
+            return {
+                reason: "no-eligible-tool-exchanges",
+                workingTokenBudget: this.maxPromptTokens,
+                payloads: {
+                    currentPromptTokens,
+                    keepFullResultCount: this.keepFullResultCount,
+                    truncateWindowCount: this.truncateWindowCount,
+                    truncatedMaxTokens: this.truncatedMaxTokens,
+                },
+            };
         }
         const prompt = clonePrompt(state.prompt);
         const maxChars = this.truncatedMaxTokens * CHARS_PER_TOKEN;
@@ -95,5 +123,17 @@ export class ToolResultDecayStrategy {
         }
         state.updatePrompt(prompt);
         state.addRemovedToolExchanges(removedExchanges);
+        return {
+            reason: "tool-results-decayed",
+            workingTokenBudget: this.maxPromptTokens,
+            payloads: {
+                currentPromptTokens,
+                keepFullResultCount: this.keepFullResultCount,
+                truncateWindowCount: this.truncateWindowCount,
+                truncatedMaxTokens: this.truncatedMaxTokens,
+                truncatedToolCallIds: [...truncateIds],
+                placeholderToolCallIds: [...placeholderIds],
+            },
+        };
     }
 }

@@ -19,7 +19,13 @@ export class HeadAndTailStrategy {
             }
         }
         if (nonSystemIndices.length <= this.headCount + this.tailCount) {
-            return;
+            return {
+                reason: "within-head-tail-window",
+                payloads: {
+                    headCount: this.headCount,
+                    tailCount: this.tailCount,
+                },
+            };
         }
         const exchanges = collectToolExchanges(prompt);
         // Determine head boundary: first headCount non-system messages
@@ -84,7 +90,13 @@ export class HeadAndTailStrategy {
         }
         // If boundaries overlap or meet, nothing to drop
         if (headEndNonSystem >= tailStartNonSystem) {
-            return;
+            return {
+                reason: "head-tail-overlap",
+                payloads: {
+                    headCount: this.headCount,
+                    tailCount: this.tailCount,
+                },
+            };
         }
         const keptIndices = getPinnedMessageIndices(prompt, state.pinnedToolCallIds);
         for (let i = 0; i < headEndNonSystem; i++) {
@@ -108,5 +120,12 @@ export class HeadAndTailStrategy {
         }
         state.updatePrompt(nextPrompt);
         state.addRemovedToolExchanges(removedToolExchanges);
+        return {
+            reason: "middle-trimmed",
+            payloads: {
+                headCount: this.headCount,
+                tailCount: this.tailCount,
+            },
+        };
     }
 }

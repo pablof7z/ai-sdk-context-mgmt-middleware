@@ -1,16 +1,20 @@
 # ai-sdk-context-management
 
-Middleware-driven context management for AI SDK language models.
+Telemetry-aware middleware-driven context management for AI SDK language models.
 
-This package provides a small runtime that returns:
+This package provides a runtime that returns:
 
 - AI SDK middleware for rewriting provider prompts before each model call
 - optional SDK tools that agents can execute to manage their own future context
+- structured runtime telemetry so hosts can understand exactly what happened
 
-V1 ships two independent strategies:
+Typical graduated stacks combine:
 
-- `SlidingWindowStrategy`: aggressively keeps a focused recent window
-- `ScratchpadStrategy`: lets agents update scratchpad notes and proactively omit older tool exchanges
+- `SystemPromptCachingStrategy`
+- `ToolResultDecayStrategy`
+- `SummarizationStrategy`
+- `ScratchpadStrategy`
+- `ContextUtilizationReminderStrategy`
 
 ## Installation
 
@@ -30,23 +34,37 @@ The middleware reads `providerOptions.contextManagement` and returned tools read
 }
 ```
 
-Define it once and pass it to both:
-
 ## Quick Start
 
 ```ts
 import { generateText, wrapLanguageModel } from "ai";
 import {
-  createContextManagementRuntime,
+  ContextUtilizationReminderStrategy,
   ScratchpadStrategy,
-  SlidingWindowStrategy,
+  SummarizationStrategy,
+  SystemPromptCachingStrategy,
+  ToolResultDecayStrategy,
+  createContextManagementRuntime,
+  createDefaultPromptTokenEstimator,
 } from "ai-sdk-context-management";
 
 const scratchpads = new Map<string, any>();
+const estimator = createDefaultPromptTokenEstimator();
 
 const runtime = createContextManagementRuntime({
   strategies: [
-    new SlidingWindowStrategy({ keepLastMessages: 6 }),
+    new SystemPromptCachingStrategy(),
+    new ToolResultDecayStrategy({
+      maxPromptTokens: 24_000,
+      estimator,
+    }),
+    new SummarizationStrategy({
+      summarize: async (messages) => {
+        return `Summary of ${messages.length} messages`;
+      },
+      maxPromptTokens: 36_000,
+      estimator,
+    }),
     new ScratchpadStrategy({
       scratchpadStore: {
         get: ({ conversationId, agentId }) => scratchpads.get(`${conversationId}:${agentId}`),
@@ -62,8 +80,19 @@ const runtime = createContextManagementRuntime({
               state,
             })),
       },
+      reminderTone: "informational",
+    }),
+    new ContextUtilizationReminderStrategy({
+      workingTokenBudget: 40_000,
+      warningThresholdRatio: 0.7,
+      mode: "scratchpad",
+      estimator,
     }),
   ],
+  estimator,
+  telemetry: async (event) => {
+    console.log("[context-management]", event.type, event);
+  },
 });
 
 const model = wrapLanguageModel({
@@ -93,7 +122,7 @@ const result = await generateText({
 
 ## API
 
-### `createContextManagementRuntime({ strategies })`
+### `createContextManagementRuntime({ strategies, telemetry, estimator })`
 
 Returns:
 
@@ -102,27 +131,66 @@ Returns:
 
 Strategies run in order. The runtime merges optional tools across all strategies and throws on tool-name collisions.
 
-### `SlidingWindowStrategy`
+### Telemetry
+
+The runtime can emit raw decision events for every request:
+
+- `runtime-start`
+- `strategy-complete`
+- `tool-execute-start`
+- `tool-execute-complete`
+- `tool-execute-error`
+- `runtime-complete`
+
+Strategy events include:
+
+- token counts before/after
+- outcome and reason
+- removed/pinned deltas
+- full `promptBefore` / `promptAfter`
+- strategy-specific payload objects
+
+Tool events include raw input/result/error payloads plus request context.
+
+### `ToolResultDecayStrategy`
 
 Options:
 
-- `keepLastMessages`
+- `keepFullResultCount`
+- `truncateWindowCount`
+- `truncatedMaxTokens`
 - `maxPromptTokens`
+- `placeholder`
 - `estimator`
 
 Behavior:
 
-- keeps all system messages
-- keeps the newest non-system messages
-- preserves tool-call/tool-result adjacency at the trim boundary
-- records removed tool exchanges for later reminder rendering
+- keeps recent tool results raw
+- truncates medium-age tool outputs
+- replaces older tool outputs with placeholders
+- leaves the tool-call / reasoning chain intact
+
+### `SummarizationStrategy`
+
+Options:
+
+- `summarize`
+- `maxPromptTokens`
+- `keepLastMessages`
+- `estimator`
+
+Behavior:
+
+- keeps recent tail messages raw
+- summarizes older messages only after the prompt crosses a configured threshold
+- preserves tool-call/tool-result adjacency at the tail boundary
 
 ### `ScratchpadStrategy`
 
 Options:
 
 - `scratchpadStore`
-- `maxScratchpadChars`
+- `reminderTone`
 - `maxRemovedToolReminderItems`
 
 Returns one tool: `scratchpad`
@@ -146,6 +214,21 @@ Behavior:
   - the current agent scratchpad
   - other agents' scratchpads with attribution
   - removed tool exchanges
+
+### `ContextUtilizationReminderStrategy`
+
+Options:
+
+- `workingTokenBudget`
+- `warningThresholdRatio`
+- `mode`
+- `estimator`
+
+Behavior:
+
+- warns once the current prompt crosses a percentage of the configured working budget
+- uses scratchpad-specific guidance when `mode === "scratchpad"`
+- appends the warning after other context-management rendering
 
 ## Running Locally
 

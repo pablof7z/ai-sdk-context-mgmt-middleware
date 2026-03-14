@@ -31,14 +31,116 @@ export interface ContextManagementStrategyState {
   addPinnedToolCallIds(toolCallIds: string[]): void;
 }
 
+export interface ContextManagementStrategyExecution {
+  outcome?: "applied" | "skipped";
+  reason?: string;
+  workingTokenBudget?: number;
+  payloads?: Record<string, unknown>;
+}
+
 export interface ContextManagementStrategy {
   readonly name?: string;
-  apply(state: ContextManagementStrategyState): Promise<void> | void;
+  apply(
+    state: ContextManagementStrategyState
+  ): Promise<ContextManagementStrategyExecution | void> | ContextManagementStrategyExecution | void;
   getOptionalTools?(): ToolSet;
 }
 
+export interface ContextManagementRuntimeStartEvent {
+  type: "runtime-start";
+  requestContext: ContextManagementRequestContext;
+  strategyNames: string[];
+  optionalToolNames: string[];
+  estimatedTokensBefore: number;
+  payloads: {
+    prompt: LanguageModelV3Prompt;
+    providerOptions: LanguageModelV3CallOptions["providerOptions"];
+  };
+}
+
+export interface ContextManagementStrategyCompleteEvent {
+  type: "strategy-complete";
+  requestContext: ContextManagementRequestContext;
+  strategyName: string;
+  outcome: "applied" | "skipped";
+  reason: string;
+  estimatedTokensBefore: number;
+  estimatedTokensAfter: number;
+  workingTokenBudget?: number;
+  removedToolExchangesDelta: number;
+  removedToolExchangesTotal: number;
+  pinnedToolCallIdsDelta: number;
+  payloads: {
+    promptBefore: LanguageModelV3Prompt;
+    promptAfter: LanguageModelV3Prompt;
+    strategy?: Record<string, unknown>;
+  };
+}
+
+export interface ContextManagementToolExecuteStartEvent {
+  type: "tool-execute-start";
+  toolName: string;
+  strategyName?: string;
+  toolCallId?: string;
+  requestContext: ContextManagementRequestContext | null;
+  payloads: {
+    input: unknown;
+  };
+}
+
+export interface ContextManagementToolExecuteCompleteEvent {
+  type: "tool-execute-complete";
+  toolName: string;
+  strategyName?: string;
+  toolCallId?: string;
+  requestContext: ContextManagementRequestContext | null;
+  payloads: {
+    input: unknown;
+    result: unknown;
+  };
+}
+
+export interface ContextManagementToolExecuteErrorEvent {
+  type: "tool-execute-error";
+  toolName: string;
+  strategyName?: string;
+  toolCallId?: string;
+  requestContext: ContextManagementRequestContext | null;
+  payloads: {
+    input: unknown;
+    error: unknown;
+  };
+}
+
+export interface ContextManagementRuntimeCompleteEvent {
+  type: "runtime-complete";
+  requestContext: ContextManagementRequestContext;
+  estimatedTokensBefore: number;
+  estimatedTokensAfter: number;
+  removedToolExchangesTotal: number;
+  pinnedToolCallIdsTotal: number;
+  payloads: {
+    promptBefore: LanguageModelV3Prompt;
+    promptAfter: LanguageModelV3Prompt;
+  };
+}
+
+export type ContextManagementTelemetryEvent =
+  | ContextManagementRuntimeStartEvent
+  | ContextManagementStrategyCompleteEvent
+  | ContextManagementToolExecuteStartEvent
+  | ContextManagementToolExecuteCompleteEvent
+  | ContextManagementToolExecuteErrorEvent
+  | ContextManagementRuntimeCompleteEvent;
+
+export type ContextManagementTelemetrySink = (
+  event: ContextManagementTelemetryEvent
+) => Promise<void> | void;
+
 export interface CreateContextManagementRuntimeOptions {
   strategies: ContextManagementStrategy[];
+  telemetry?: ContextManagementTelemetrySink;
+  estimator?: PromptTokenEstimator;
 }
 
 export interface ContextManagementRuntime {
@@ -67,6 +169,13 @@ export interface HeadAndTailStrategyOptions {
 
 export interface SystemPromptCachingStrategyOptions {
   consolidateSystemMessages?: boolean;
+}
+
+export interface ContextUtilizationReminderStrategyOptions {
+  workingTokenBudget: number;
+  warningThresholdRatio?: number;
+  estimator?: PromptTokenEstimator;
+  mode?: "scratchpad" | "generic";
 }
 
 export interface SummarizationStrategyOptions {
@@ -143,6 +252,7 @@ export interface ScratchpadStore {
 
 export interface ScratchpadStrategyOptions {
   scratchpadStore: ScratchpadStore;
+  reminderTone?: "informational" | "urgent" | "silent";
   maxRemovedToolReminderItems?: number;
 }
 

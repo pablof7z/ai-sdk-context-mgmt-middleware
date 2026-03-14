@@ -5,6 +5,7 @@ export { ToolResultDecayStrategy } from "./tool-result-decay-strategy.js";
 export { HeadAndTailStrategy } from "./head-and-tail-strategy.js";
 export { SystemPromptCachingStrategy } from "./system-prompt-caching-strategy.js";
 export { SummarizationStrategy } from "./summarization-strategy.js";
+export { ContextUtilizationReminderStrategy } from "./context-utilization-reminder-strategy.js";
 export { CompactionToolStrategy } from "./compaction-tool-strategy.js";
 export { PinnedMessagesStrategy } from "./pinned-messages-strategy.js";
 export { createDefaultPromptTokenEstimator } from "./token-estimator.js";
@@ -17,7 +18,11 @@ export type {
   ContextManagementRequestContext,
   ContextManagementRuntime,
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
+  ContextManagementTelemetryEvent,
+  ContextManagementTelemetrySink,
+  ContextUtilizationReminderStrategyOptions,
   CreateContextManagementRuntimeOptions,
   HeadAndTailStrategyOptions,
   PinnedMessagesStrategyOptions,

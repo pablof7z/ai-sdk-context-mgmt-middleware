@@ -2,6 +2,7 @@ import { clonePrompt, collectToolExchanges } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   RemovedToolExchange,
   ToolResultDecayStrategyOptions,
@@ -31,18 +32,37 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
   }
 
-  apply(state: ContextManagementStrategyState): void {
+  apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
+    const currentPromptTokens = this.estimator.estimatePrompt(state.prompt);
     if (
       this.maxPromptTokens !== undefined &&
-      this.estimator.estimatePrompt(state.prompt) <= this.maxPromptTokens
+      currentPromptTokens <= this.maxPromptTokens
     ) {
-      return;
+      return {
+        reason: "below-token-threshold",
+        workingTokenBudget: this.maxPromptTokens,
+        payloads: {
+          currentPromptTokens,
+          keepFullResultCount: this.keepFullResultCount,
+          truncateWindowCount: this.truncateWindowCount,
+          truncatedMaxTokens: this.truncatedMaxTokens,
+        },
+      };
     }
 
     const exchanges = collectToolExchanges(state.prompt);
 
     if (exchanges.size === 0) {
-      return;
+      return {
+        reason: "no-tool-exchanges",
+        workingTokenBudget: this.maxPromptTokens,
+        payloads: {
+          currentPromptTokens,
+          keepFullResultCount: this.keepFullResultCount,
+          truncateWindowCount: this.truncateWindowCount,
+          truncatedMaxTokens: this.truncatedMaxTokens,
+        },
+      };
     }
 
     // Sort exchanges by their result message position, most recent last.
@@ -83,7 +103,16 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
     }
 
     if (truncateIds.size === 0 && placeholderIds.size === 0) {
-      return;
+      return {
+        reason: "no-eligible-tool-exchanges",
+        workingTokenBudget: this.maxPromptTokens,
+        payloads: {
+          currentPromptTokens,
+          keepFullResultCount: this.keepFullResultCount,
+          truncateWindowCount: this.truncateWindowCount,
+          truncatedMaxTokens: this.truncatedMaxTokens,
+        },
+      };
     }
 
     const prompt = clonePrompt(state.prompt);
@@ -122,6 +151,19 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(prompt);
     state.addRemovedToolExchanges(removedExchanges);
+
+    return {
+      reason: "tool-results-decayed",
+      workingTokenBudget: this.maxPromptTokens,
+      payloads: {
+        currentPromptTokens,
+        keepFullResultCount: this.keepFullResultCount,
+        truncateWindowCount: this.truncateWindowCount,
+        truncatedMaxTokens: this.truncatedMaxTokens,
+        truncatedToolCallIds: [...truncateIds],
+        placeholderToolCallIds: [...placeholderIds],
+      },
+    };
   }
 
 }

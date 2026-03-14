@@ -1,5 +1,5 @@
 import { type ToolSet } from "ai";
-import type { CompactionToolStrategyOptions, ContextManagementStrategy, ContextManagementStrategyState } from "./types.js";
+import type { CompactionToolStrategyOptions, ContextManagementStrategy, ContextManagementStrategyExecution, ContextManagementStrategyState } from "./types.js";
 export declare class CompactionToolStrategy implements ContextManagementStrategy {
     readonly name = "compaction-tool";
     private readonly summarize;
@@ -9,5 +9,5 @@ export declare class CompactionToolStrategy implements ContextManagementStrategy
     private readonly pendingCompactionKeys;
     constructor(options: CompactionToolStrategyOptions);
     getOptionalTools(): ToolSet;
-    apply(state: ContextManagementStrategyState): Promise<void>;
+    apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;
 }

@@ -5,6 +5,7 @@ import {
 } from "./prompt-utils.js";
 import type {
   ContextManagementStrategy,
+  ContextManagementStrategyExecution,
   ContextManagementStrategyState,
   HeadAndTailStrategyOptions,
   RemovedToolExchange,
@@ -25,7 +26,7 @@ export class HeadAndTailStrategy implements ContextManagementStrategy {
     this.tailCount = Math.max(0, Math.floor(options.tailCount ?? DEFAULT_TAIL_COUNT));
   }
 
-  apply(state: ContextManagementStrategyState): void {
+  apply(state: ContextManagementStrategyState): ContextManagementStrategyExecution {
     const prompt = state.prompt;
 
     const nonSystemIndices: number[] = [];
@@ -36,7 +37,13 @@ export class HeadAndTailStrategy implements ContextManagementStrategy {
     }
 
     if (nonSystemIndices.length <= this.headCount + this.tailCount) {
-      return;
+      return {
+        reason: "within-head-tail-window",
+        payloads: {
+          headCount: this.headCount,
+          tailCount: this.tailCount,
+        },
+      };
     }
 
     const exchanges = collectToolExchanges(prompt);
@@ -109,7 +116,13 @@ export class HeadAndTailStrategy implements ContextManagementStrategy {
 
     // If boundaries overlap or meet, nothing to drop
     if (headEndNonSystem >= tailStartNonSystem) {
-      return;
+      return {
+        reason: "head-tail-overlap",
+        payloads: {
+          headCount: this.headCount,
+          tailCount: this.tailCount,
+        },
+      };
     }
 
     const keptIndices = getPinnedMessageIndices(prompt, state.pinnedToolCallIds);
@@ -139,5 +152,13 @@ export class HeadAndTailStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(nextPrompt);
     state.addRemovedToolExchanges(removedToolExchanges);
+
+    return {
+      reason: "middle-trimmed",
+      payloads: {
+        headCount: this.headCount,
+        tailCount: this.tailCount,
+      },
+    };
   }
 }
