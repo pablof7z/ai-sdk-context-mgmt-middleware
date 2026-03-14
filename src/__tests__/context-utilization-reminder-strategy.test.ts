@@ -23,6 +23,7 @@ describe("ContextUtilizationReminderStrategy", () => {
       updatePrompt(nextPrompt: typeof prompt) {
         this.prompt = nextPrompt;
       },
+      updateParams() {},
       addRemovedToolExchanges() {},
       addPinnedToolCallIds() {},
     } as any;

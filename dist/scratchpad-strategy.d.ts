@@ -5,6 +5,9 @@ export declare class ScratchpadStrategy implements ContextManagementStrategy {
     private readonly scratchpadStore;
     private readonly reminderTone;
     private readonly maxRemovedToolReminderItems;
+    private readonly workingTokenBudget?;
+    private readonly forceToolThresholdRatio?;
+    private readonly estimator;
     private readonly optionalTools;
     constructor(options: ScratchpadStrategyOptions);
     getOptionalTools(): ToolSet;

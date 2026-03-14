@@ -1,15 +1,18 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
 import {
   appendReminderToLatestUserMessage,
+  getLatestToolActivity,
   removeToolExchanges,
   trimPromptToLastMessages,
 } from "./prompt-utils.js";
+import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 import type {
   ContextManagementRequestContext,
   ContextManagementStrategy,
   ContextManagementStrategyExecution,
   ContextManagementStrategyState,
+  PromptTokenEstimator,
   ScratchpadConversationEntry,
   ScratchpadState,
   ScratchpadStore,
@@ -164,13 +167,33 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
   private readonly scratchpadStore: ScratchpadStore;
   private readonly reminderTone: "informational" | "urgent" | "silent";
   private readonly maxRemovedToolReminderItems: number;
+  private readonly workingTokenBudget?: number;
+  private readonly forceToolThresholdRatio?: number;
+  private readonly estimator: PromptTokenEstimator;
   private readonly optionalTools: ToolSet;
 
   constructor(options: ScratchpadStrategyOptions) {
+    const normalizedWorkingTokenBudget = typeof options.workingTokenBudget === "number"
+      && Number.isFinite(options.workingTokenBudget)
+      && options.workingTokenBudget > 0
+      ? Math.floor(options.workingTokenBudget)
+      : undefined;
+    const normalizedForceThresholdRatio = typeof options.forceToolThresholdRatio === "number"
+      && Number.isFinite(options.forceToolThresholdRatio)
+      ? Math.min(1, Math.max(0, options.forceToolThresholdRatio))
+      : undefined;
+
+    if (normalizedForceThresholdRatio !== undefined && normalizedWorkingTokenBudget === undefined) {
+      throw new Error("ScratchpadStrategy forceToolThresholdRatio requires workingTokenBudget");
+    }
+
     this.scratchpadStore = options.scratchpadStore;
     this.reminderTone = options.reminderTone ?? "informational";
     this.maxRemovedToolReminderItems =
       options.maxRemovedToolReminderItems ?? DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS;
+    this.workingTokenBudget = normalizedWorkingTokenBudget;
+    this.forceToolThresholdRatio = normalizedForceThresholdRatio;
+    this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
     this.optionalTools = {
       scratchpad: tool<ScratchpadToolInput, ScratchpadToolResult>({
         description: "Update your scratchpad and proactively remove older context from future turns. Scratchpad notes persist within this conversation only — they do not carry over to new conversations.",
@@ -288,8 +311,36 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
 
     state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
 
+    const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
+      + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
+    const forceThresholdTokens = this.forceToolThresholdRatio !== undefined
+      && this.workingTokenBudget !== undefined
+      ? Math.floor(this.workingTokenBudget * this.forceToolThresholdRatio)
+      : undefined;
+    const latestToolActivity = getLatestToolActivity(state.prompt);
+    const alreadyForcedToScratchpad = state.params?.toolChoice?.type === "tool"
+      && state.params?.toolChoice?.toolName === "scratchpad";
+    const justCalledScratchpad = latestToolActivity?.toolName === "scratchpad";
+    const shouldForceToolChoice = forceThresholdTokens !== undefined
+      && estimatedTokens >= forceThresholdTokens
+      && !alreadyForcedToScratchpad
+      && !justCalledScratchpad;
+
+    if (shouldForceToolChoice) {
+      state.updateParams({
+        toolChoice: {
+          type: "tool",
+          toolName: "scratchpad",
+        },
+      });
+    }
+
     return {
-      reason: "scratchpad-rendered",
+      outcome: shouldForceToolChoice ? "applied" : undefined,
+      reason: shouldForceToolChoice
+        ? "scratchpad-rendered-and-tool-forced"
+        : "scratchpad-rendered",
+      ...(this.workingTokenBudget !== undefined ? { workingTokenBudget: this.workingTokenBudget } : {}),
       payloads: {
         currentState,
         otherScratchpads: allScratchpads,
@@ -297,6 +348,11 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
         appliedKeepLastMessages: currentState.keepLastMessages,
         reminderTone: this.reminderTone,
         reminderText: reminderBlock,
+        estimatedTokens,
+        forceToolThresholdRatio: this.forceToolThresholdRatio,
+        forceThresholdTokens,
+        forcedToolChoice: shouldForceToolChoice,
+        latestToolActivity,
       },
     };
   }

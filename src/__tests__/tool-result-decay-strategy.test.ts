@@ -40,6 +40,7 @@ function createMockState(prompt: LanguageModelV3Prompt, pinnedIds: string[] = []
     updatePrompt(newPrompt: LanguageModelV3Prompt) {
       state.prompt = newPrompt;
     },
+    updateParams() {},
     addRemovedToolExchanges(exchanges: RemovedToolExchange[]) {
       capturedRemoved.push(...exchanges);
     },

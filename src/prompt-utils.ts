@@ -297,6 +297,42 @@ export function collectToolExchanges(prompt: LanguageModelV3Prompt): Map<string,
   return exchanges;
 }
 
+export function getLatestToolActivity(prompt: LanguageModelV3Prompt): {
+  toolCallId: string;
+  toolName: string;
+  type: "tool-call" | "tool-result";
+} | null {
+  for (let messageIndex = prompt.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = prompt[messageIndex];
+
+    if (message.role === "system") {
+      continue;
+    }
+
+    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.content[partIndex];
+
+      if (isToolResultPart(part)) {
+        return {
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          type: "tool-result",
+        };
+      }
+
+      if (isToolCallPart(part)) {
+        return {
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          type: "tool-call",
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 export function removeToolExchanges(
   prompt: LanguageModelV3Prompt,
   toolCallIds: readonly string[],

@@ -24,6 +24,12 @@ function makeState(
       this.prompt = p;
       this.params = { ...this.params, prompt: p };
     },
+    updateParams(patch: Partial<{ prompt: LanguageModelV3Prompt }>) {
+      this.params = { ...this.params, ...patch };
+      if (patch.prompt) {
+        this.prompt = patch.prompt;
+      }
+    },
     addRemovedToolExchanges(e: RemovedToolExchange[]) {
       this.removedToolExchanges.push(...e);
     },

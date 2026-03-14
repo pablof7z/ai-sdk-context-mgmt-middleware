@@ -27,6 +27,7 @@ function makeState(prompt: ReturnType<typeof makePrompt>) {
     requestContext: { conversationId: "conv-1", agentId: "agent-1" },
     params: { prompt, providerOptions: {} },
     updatePrompt(p: typeof prompt) { this.prompt = p; },
+    updateParams() {},
     addRemovedToolExchanges(e: RemovedToolExchange[]) { this.removedToolExchanges.push(...e); },
     addPinnedToolCallIds(ids: string[]) { for (const id of ids) pinnedToolCallIds.add(id); },
   } as unknown as ContextManagementStrategyState & { pinnedToolCallIds: Set<string> };

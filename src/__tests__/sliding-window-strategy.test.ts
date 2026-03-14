@@ -35,12 +35,17 @@ describe("SlidingWindowStrategy", () => {
     const state = {
       prompt: makePrompt(),
       removedToolExchanges: [],
+      params: { prompt: makePrompt(), providerOptions: {} },
+      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
+      pinnedToolCallIds: new Set<string>(),
       updatePrompt(prompt: any) {
         this.prompt = prompt;
       },
+      updateParams() {},
       addRemovedToolExchanges(exchanges: any[]) {
         captured.push(...exchanges);
       },
+      addPinnedToolCallIds() {},
     };
 
     strategy.apply(state as any);

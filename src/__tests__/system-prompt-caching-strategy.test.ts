@@ -12,6 +12,7 @@ describe("SystemPromptCachingStrategy", () => {
       updatePrompt(p: LanguageModelV3Prompt) {
         this.prompt = p;
       },
+      updateParams() {},
       addRemovedToolExchanges() {},
       addPinnedToolCallIds() {},
     };

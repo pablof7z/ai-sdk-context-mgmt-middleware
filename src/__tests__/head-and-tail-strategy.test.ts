@@ -12,6 +12,7 @@ function makeState(prompt: LanguageModelV3Prompt, pinnedIds: string[] = []) {
     updatePrompt(p: LanguageModelV3Prompt) {
       this.prompt = p;
     },
+    updateParams() {},
     addRemovedToolExchanges(exchanges: RemovedToolExchange[]) {
       captured.push(...exchanges);
     },

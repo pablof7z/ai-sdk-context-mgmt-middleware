@@ -12,6 +12,11 @@ export declare function buildPromptFromSelectedIndices(prompt: LanguageModelV3Pr
 export declare function clonePrompt(prompt: LanguageModelV3Prompt): LanguageModelV3Prompt;
 export declare function extractRequestContext(params: Pick<LanguageModelV3CallOptions, "providerOptions">): ContextManagementRequestContext | null;
 export declare function collectToolExchanges(prompt: LanguageModelV3Prompt): Map<string, ToolExchange>;
+export declare function getLatestToolActivity(prompt: LanguageModelV3Prompt): {
+    toolCallId: string;
+    toolName: string;
+    type: "tool-call" | "tool-result";
+} | null;
 export declare function removeToolExchanges(prompt: LanguageModelV3Prompt, toolCallIds: readonly string[], reason: string): {
     prompt: LanguageModelV3Prompt;
     removedToolExchanges: RemovedToolExchange[];

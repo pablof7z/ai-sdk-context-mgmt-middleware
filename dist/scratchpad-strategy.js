@@ -1,5 +1,6 @@
 import { jsonSchema, tool } from "ai";
-import { appendReminderToLatestUserMessage, removeToolExchanges, trimPromptToLastMessages, } from "./prompt-utils.js";
+import { appendReminderToLatestUserMessage, getLatestToolActivity, removeToolExchanges, trimPromptToLastMessages, } from "./prompt-utils.js";
+import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
 const DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS = 10;
 function dedupeStrings(values) {
@@ -104,12 +105,30 @@ export class ScratchpadStrategy {
     scratchpadStore;
     reminderTone;
     maxRemovedToolReminderItems;
+    workingTokenBudget;
+    forceToolThresholdRatio;
+    estimator;
     optionalTools;
     constructor(options) {
+        const normalizedWorkingTokenBudget = typeof options.workingTokenBudget === "number"
+            && Number.isFinite(options.workingTokenBudget)
+            && options.workingTokenBudget > 0
+            ? Math.floor(options.workingTokenBudget)
+            : undefined;
+        const normalizedForceThresholdRatio = typeof options.forceToolThresholdRatio === "number"
+            && Number.isFinite(options.forceToolThresholdRatio)
+            ? Math.min(1, Math.max(0, options.forceToolThresholdRatio))
+            : undefined;
+        if (normalizedForceThresholdRatio !== undefined && normalizedWorkingTokenBudget === undefined) {
+            throw new Error("ScratchpadStrategy forceToolThresholdRatio requires workingTokenBudget");
+        }
         this.scratchpadStore = options.scratchpadStore;
         this.reminderTone = options.reminderTone ?? "informational";
         this.maxRemovedToolReminderItems =
             options.maxRemovedToolReminderItems ?? DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS;
+        this.workingTokenBudget = normalizedWorkingTokenBudget;
+        this.forceToolThresholdRatio = normalizedForceThresholdRatio;
+        this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
         this.optionalTools = {
             scratchpad: tool({
                 description: "Update your scratchpad and proactively remove older context from future turns. Scratchpad notes persist within this conversation only — they do not carry over to new conversations.",
@@ -201,8 +220,34 @@ export class ScratchpadStrategy {
             maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
         });
         state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminderBlock));
+        const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
+            + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
+        const forceThresholdTokens = this.forceToolThresholdRatio !== undefined
+            && this.workingTokenBudget !== undefined
+            ? Math.floor(this.workingTokenBudget * this.forceToolThresholdRatio)
+            : undefined;
+        const latestToolActivity = getLatestToolActivity(state.prompt);
+        const alreadyForcedToScratchpad = state.params?.toolChoice?.type === "tool"
+            && state.params?.toolChoice?.toolName === "scratchpad";
+        const justCalledScratchpad = latestToolActivity?.toolName === "scratchpad";
+        const shouldForceToolChoice = forceThresholdTokens !== undefined
+            && estimatedTokens >= forceThresholdTokens
+            && !alreadyForcedToScratchpad
+            && !justCalledScratchpad;
+        if (shouldForceToolChoice) {
+            state.updateParams({
+                toolChoice: {
+                    type: "tool",
+                    toolName: "scratchpad",
+                },
+            });
+        }
         return {
-            reason: "scratchpad-rendered",
+            outcome: shouldForceToolChoice ? "applied" : undefined,
+            reason: shouldForceToolChoice
+                ? "scratchpad-rendered-and-tool-forced"
+                : "scratchpad-rendered",
+            ...(this.workingTokenBudget !== undefined ? { workingTokenBudget: this.workingTokenBudget } : {}),
             payloads: {
                 currentState,
                 otherScratchpads: allScratchpads,
@@ -210,6 +255,11 @@ export class ScratchpadStrategy {
                 appliedKeepLastMessages: currentState.keepLastMessages,
                 reminderTone: this.reminderTone,
                 reminderText: reminderBlock,
+                estimatedTokens,
+                forceToolThresholdRatio: this.forceToolThresholdRatio,
+                forceThresholdTokens,
+                forcedToolChoice: shouldForceToolChoice,
+                latestToolActivity,
             },
         };
     }

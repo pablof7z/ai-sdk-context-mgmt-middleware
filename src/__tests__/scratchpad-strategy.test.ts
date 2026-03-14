@@ -85,10 +85,17 @@ describe("ScratchpadStrategy", () => {
         agentLabel: "Alpha",
       },
       prompt,
+      params: { prompt, providerOptions: {} },
       pinnedToolCallIds: new Set<string>(),
       removedToolExchanges: [] as any[],
       updatePrompt(nextPrompt: any) {
         this.prompt = nextPrompt;
+      },
+      updateParams(patch: any) {
+        this.params = { ...this.params, ...patch };
+        if (patch.prompt) {
+          this.prompt = patch.prompt;
+        }
       },
       addRemovedToolExchanges(exchanges: any[]) {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
@@ -157,10 +164,17 @@ describe("ScratchpadStrategy", () => {
         agentId: "agent-1",
       },
       prompt: alreadySmallPrompt,
+      params: { prompt: alreadySmallPrompt, providerOptions: {} },
       pinnedToolCallIds: new Set<string>(),
       removedToolExchanges: [] as any[],
       updatePrompt(nextPrompt: any) {
         this.prompt = nextPrompt;
+      },
+      updateParams(patch: any) {
+        this.params = { ...this.params, ...patch };
+        if (patch.prompt) {
+          this.prompt = patch.prompt;
+        }
       },
       addRemovedToolExchanges(exchanges: any[]) {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
@@ -192,10 +206,17 @@ describe("ScratchpadStrategy", () => {
         agentId: "agent-1",
       },
       prompt: makePrompt(),
+      params: { prompt: makePrompt(), providerOptions: {} },
       pinnedToolCallIds,
       removedToolExchanges: [] as any[],
       updatePrompt(nextPrompt: any) {
         this.prompt = nextPrompt;
+      },
+      updateParams(patch: any) {
+        this.params = { ...this.params, ...patch };
+        if (patch.prompt) {
+          this.prompt = patch.prompt;
+        }
       },
       addRemovedToolExchanges(exchanges: any[]) {
         this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
@@ -216,5 +237,168 @@ describe("ScratchpadStrategy", () => {
         )
       )
     ).toBe(true);
+  });
+
+  test("forces scratchpad tool choice once the configured threshold is crossed", async () => {
+    const store = new InMemoryScratchpadStore();
+    const prompt = [
+      ...makePrompt(),
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "call-new",
+            toolName: "fs_read",
+            input: { path: "new.ts" },
+          },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          {
+            type: "tool-result" as const,
+            toolCallId: "call-new",
+            toolName: "fs_read",
+            output: { type: "text" as const, value: "x".repeat(800) },
+          },
+        ],
+      },
+    ];
+    const strategy = new ScratchpadStrategy({
+      scratchpadStore: store,
+      workingTokenBudget: 100,
+      forceToolThresholdRatio: 0.7,
+      estimator: {
+        estimateMessage: () => 10,
+        estimatePrompt: () => 80,
+      },
+    });
+    const state = {
+      requestContext: {
+        conversationId: "conv-1",
+        agentId: "agent-1",
+      },
+      prompt,
+      params: { prompt, providerOptions: {} },
+      pinnedToolCallIds: new Set<string>(),
+      removedToolExchanges: [] as any[],
+      updatePrompt(nextPrompt: any) {
+        this.prompt = nextPrompt;
+      },
+      updateParams(patch: any) {
+        this.params = { ...this.params, ...patch };
+        if (patch.prompt) {
+          this.prompt = patch.prompt;
+        }
+      },
+      addRemovedToolExchanges(exchanges: any[]) {
+        this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
+      },
+      addPinnedToolCallIds() {},
+    };
+
+    const result = await strategy.apply(state as any);
+
+    expect(state.params.toolChoice).toEqual({
+      type: "tool",
+      toolName: "scratchpad",
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        outcome: "applied",
+        reason: "scratchpad-rendered-and-tool-forced",
+        workingTokenBudget: 100,
+        payloads: expect.objectContaining({
+          forcedToolChoice: true,
+          forceThresholdTokens: 70,
+        }),
+      })
+    );
+  });
+
+  test("does not immediately re-force scratchpad after a scratchpad call/result", async () => {
+    const store = new InMemoryScratchpadStore();
+    const prompt = [
+      {
+        role: "system" as const,
+        content: "You are helpful.",
+      },
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "scratch-call-1",
+            toolName: "scratchpad",
+            input: { notes: "keep parser state" },
+          },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: [
+          {
+            type: "tool-result" as const,
+            toolCallId: "scratch-call-1",
+            toolName: "scratchpad",
+            output: { type: "json" as const, value: { ok: true } },
+          },
+        ],
+      },
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "Continue." }],
+      },
+    ];
+    const strategy = new ScratchpadStrategy({
+      scratchpadStore: store,
+      workingTokenBudget: 100,
+      forceToolThresholdRatio: 0.7,
+      estimator: {
+        estimateMessage: () => 10,
+        estimatePrompt: () => 80,
+      },
+    });
+    const state = {
+      requestContext: {
+        conversationId: "conv-1",
+        agentId: "agent-1",
+      },
+      prompt,
+      params: { prompt, providerOptions: {} },
+      pinnedToolCallIds: new Set<string>(),
+      removedToolExchanges: [] as any[],
+      updatePrompt(nextPrompt: any) {
+        this.prompt = nextPrompt;
+      },
+      updateParams(patch: any) {
+        this.params = { ...this.params, ...patch };
+        if (patch.prompt) {
+          this.prompt = patch.prompt;
+        }
+      },
+      addRemovedToolExchanges(exchanges: any[]) {
+        this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
+      },
+      addPinnedToolCallIds() {},
+    };
+
+    const result = await strategy.apply(state as any);
+
+    expect(state.params.toolChoice).toBeUndefined();
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: "scratchpad-rendered",
+        payloads: expect.objectContaining({
+          forcedToolChoice: false,
+          latestToolActivity: expect.objectContaining({
+            toolName: "scratchpad",
+            type: "tool-result",
+          }),
+        }),
+      })
+    );
   });
 });

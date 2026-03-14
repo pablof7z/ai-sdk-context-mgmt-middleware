@@ -46,6 +46,7 @@ function createMockState(prompt: LanguageModelV3Prompt): ContextManagementStrate
     updatePrompt(newPrompt: LanguageModelV3Prompt) {
       (this as any).prompt = newPrompt;
     },
+    updateParams() {},
     addRemovedToolExchanges(exchanges: RemovedToolExchange[]) {
       capturedRemovedExchanges.push(...exchanges);
     },
