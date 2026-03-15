@@ -33,7 +33,7 @@ describe("createContextManagementRuntime", () => {
     expect(result).toBe(params);
   });
 
-  test("emits runtime and strategy telemetry with full prompt payloads", async () => {
+  test("emits runtime and strategy telemetry with message counts", async () => {
     const events: ContextManagementTelemetryEvent[] = [];
     const runtime = createContextManagementRuntime({
       strategies: [new SlidingWindowStrategy({ keepLastMessages: 2 })],
@@ -69,12 +69,25 @@ describe("createContextManagementRuntime", () => {
       "runtime-complete",
     ]);
 
+    const startEvent = events[0];
+    expect(startEvent.type).toBe("runtime-start");
+    if (startEvent.type === "runtime-start") {
+      expect(startEvent.messageCount).toBe(prompt.length);
+    }
+
     const strategyEvent = events[1];
     expect(strategyEvent.type).toBe("strategy-complete");
     if (strategyEvent.type === "strategy-complete") {
       expect(strategyEvent.strategyName).toBe("sliding-window");
-      expect(strategyEvent.payloads.promptBefore).toBeDefined();
-      expect(strategyEvent.payloads.promptAfter).toBeDefined();
+      expect(strategyEvent.messageCountBefore).toBe(prompt.length);
+      expect(strategyEvent.messageCountAfter).toBeLessThan(prompt.length);
+    }
+
+    const completeEvent = events[2];
+    expect(completeEvent.type).toBe("runtime-complete");
+    if (completeEvent.type === "runtime-complete") {
+      expect(completeEvent.messageCountBefore).toBe(prompt.length);
+      expect(completeEvent.messageCountAfter).toBeLessThan(prompt.length);
     }
   });
 

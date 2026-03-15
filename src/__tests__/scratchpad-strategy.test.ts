@@ -201,12 +201,9 @@ describe("ScratchpadStrategy", () => {
     expect(result).toEqual({
       reason: "scratchpad-rendered",
       payloads: expect.objectContaining({
-        currentState: expect.objectContaining({
-          notes: "Keep the working set tight.",
-        }),
-        appliedOmitToolCallIds: ["call-old", "call-older"],
+        notesCharCount: "Keep the working set tight.".length,
+        appliedOmitCount: 2,
         reminderTone: "informational",
-        reminderText: expect.stringContaining("You can update these notes"),
       }),
     });
   });
@@ -366,10 +363,7 @@ describe("ScratchpadStrategy", () => {
         reason: "scratchpad-rendered",
         payloads: expect.objectContaining({
           forcedToolChoice: false,
-          latestToolActivity: expect.objectContaining({
-            toolName: "scratchpad",
-            type: "tool-result",
-          }),
+          latestToolName: "scratchpad",
         }),
       })
     );

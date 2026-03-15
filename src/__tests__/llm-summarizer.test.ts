@@ -180,7 +180,8 @@ describe("LLM-backed summarization", () => {
       expect.objectContaining({
         reason: "history-summarized",
         payloads: expect.objectContaining({
-          summaryText: "Key Findings\n- Parser issue in /tmp/parser.ts",
+          messagesSummarizedCount: expect.any(Number),
+          summaryCharCount: "Key Findings\n- Parser issue in /tmp/parser.ts".length,
         }),
       })
     );

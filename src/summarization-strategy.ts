@@ -123,8 +123,8 @@ export class SummarizationStrategy implements ContextManagementStrategy {
       payloads: {
         estimatedTokens,
         keepLastMessages: this.keepLastMessages,
-        messagesToSummarize,
-        summaryText,
+        messagesSummarizedCount: messagesToSummarize.length,
+        summaryCharCount: summaryText.length,
       },
     };
   }

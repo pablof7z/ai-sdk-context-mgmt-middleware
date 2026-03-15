@@ -21,9 +21,11 @@ export class HeadAndTailStrategy {
                 payloads: {
                     headCount: this.headCount,
                     tailCount: this.tailCount,
+                    messagesDropped: 0,
                 },
             };
         }
+        const messagesDropped = state.prompt.length - result.prompt.length;
         state.updatePrompt(result.prompt);
         state.addRemovedToolExchanges(result.removedToolExchanges);
         return {
@@ -31,6 +33,7 @@ export class HeadAndTailStrategy {
             payloads: {
                 headCount: this.headCount,
                 tailCount: this.tailCount,
+                messagesDropped,
             },
         };
     }

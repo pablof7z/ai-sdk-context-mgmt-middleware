@@ -35,6 +35,7 @@ export type {
   ContextWindowStatusStrategyOptions,
   ContextUtilizationReminderStrategyOptions,
   CreateContextManagementRuntimeOptions,
+  DecayedToolContext,
   HeadAndTailStrategyOptions,
   LLMSummarizationStrategyOptions,
   LlmSummarizerFormattingOptions,

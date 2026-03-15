@@ -3,6 +3,7 @@ import type {
   LanguageModelV3Message,
   LanguageModelV3Middleware,
   LanguageModelV3Prompt,
+  LanguageModelV3ToolResultOutput,
 } from "@ai-sdk/provider";
 import type { LanguageModel, ToolSet } from "ai";
 
@@ -74,8 +75,8 @@ export interface ContextManagementRuntimeStartEvent {
   strategyNames: string[];
   optionalToolNames: string[];
   estimatedTokensBefore: number;
+  messageCount: number;
   payloads: {
-    prompt: LanguageModelV3Prompt;
     providerOptions: LanguageModelV3CallOptions["providerOptions"];
   };
 }
@@ -92,9 +93,9 @@ export interface ContextManagementStrategyCompleteEvent {
   removedToolExchangesDelta: number;
   removedToolExchangesTotal: number;
   pinnedToolCallIdsDelta: number;
+  messageCountBefore: number;
+  messageCountAfter: number;
   payloads: {
-    promptBefore: LanguageModelV3Prompt;
-    promptAfter: LanguageModelV3Prompt;
     strategy?: Record<string, unknown>;
   };
 }
@@ -141,10 +142,8 @@ export interface ContextManagementRuntimeCompleteEvent {
   estimatedTokensAfter: number;
   removedToolExchangesTotal: number;
   pinnedToolCallIdsTotal: number;
-  payloads: {
-    promptBefore: LanguageModelV3Prompt;
-    promptAfter: LanguageModelV3Prompt;
-  };
+  messageCountBefore: number;
+  messageCountAfter: number;
 }
 
 export type ContextManagementTelemetryEvent =
@@ -177,12 +176,20 @@ export interface PromptTokenEstimator {
   estimateTools?(tools: LanguageModelV3CallOptions["tools"]): number;
 }
 
+export interface DecayedToolContext {
+  toolName: string;
+  toolCallId: string;
+  input: unknown;
+  output: LanguageModelV3ToolResultOutput;
+  action: "truncate" | "placeholder";
+}
+
 export interface ToolResultDecayStrategyOptions {
-  keepFullResultCount?: number;
   truncatedMaxTokens?: number;
-  truncateWindowCount?: number;
+  placeholderFloorTokens?: number;
   maxPromptTokens?: number;
-  placeholder?: string | ((toolName: string, toolCallId: string) => string);
+  placeholder?: string | ((context: DecayedToolContext) => string);
+  decayInputs?: boolean;
   estimator?: PromptTokenEstimator;
 }
 

@@ -118,8 +118,8 @@ describe("SummarizationStrategy", () => {
       payloads: expect.objectContaining({
         estimatedTokens: 700,
         keepLastMessages: 2,
-        messagesToSummarize: expect.any(Array),
-        summaryText: "summary of 4 messages",
+        messagesSummarizedCount: 4,
+        summaryCharCount: "summary of 4 messages".length,
       }),
     });
   });

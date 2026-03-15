@@ -84,8 +84,8 @@ export class SummarizationStrategy {
             payloads: {
                 estimatedTokens,
                 keepLastMessages: this.keepLastMessages,
-                messagesToSummarize,
-                summaryText,
+                messagesSummarizedCount: messagesToSummarize.length,
+                summaryCharCount: summaryText.length,
             },
         };
     }

@@ -1,4 +1,4 @@
-import type { LanguageModelV3CallOptions, LanguageModelV3Middleware, LanguageModelV3Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV3CallOptions, LanguageModelV3Middleware } from "@ai-sdk/provider";
 import type { ToolSet } from "ai";
 import { appendReminderToLatestUserMessage, clonePrompt, extractRequestContext } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
@@ -104,12 +104,8 @@ function cloneUnknown<T>(value: T): T {
   return value;
 }
 
-function promptsEqual(a: LanguageModelV3Prompt, b: LanguageModelV3Prompt): boolean {
-  try {
-    return JSON.stringify(a) === JSON.stringify(b);
-  } catch {
-    return false;
-  }
+function countMessages(prompt: LanguageModelV3CallOptions["prompt"]): number {
+  return prompt.length;
 }
 
 function extractRequestContextFromExperimentalContext(
@@ -277,34 +273,36 @@ export function createContextManagementRuntime(
         provider: model.provider,
         modelId: model.modelId,
       }, options.reminderSink);
-      const initialPrompt = clonePrompt(state.prompt);
       const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
-      const estimate = (prompt: LanguageModelV3Prompt) =>
+      const estimate = (prompt: LanguageModelV3CallOptions["prompt"]) =>
         estimator.estimatePrompt(prompt) + toolTokenOverhead;
+      const initialTokenEstimate = estimate(state.prompt);
+      const initialMessageCount = countMessages(state.prompt);
 
       await emitTelemetry(options.telemetry, () => ({
         type: "runtime-start",
         requestContext,
         strategyNames: strategies.map((strategy) => strategy.name ?? "unnamed-strategy"),
         optionalToolNames: Object.keys(optionalTools),
-        estimatedTokensBefore: estimate(initialPrompt),
+        estimatedTokensBefore: initialTokenEstimate,
+        messageCount: initialMessageCount,
         payloads: {
-          prompt: initialPrompt,
           providerOptions: cloneUnknown(params.providerOptions),
         },
       }));
 
       for (const strategy of strategies) {
-        const promptBefore = clonePrompt(state.prompt);
         const removedBefore = state.removedToolExchanges.length;
         const pinnedBefore = state.pinnedToolCallIds.size;
-        const estimatedTokensBefore = estimate(promptBefore);
+        const messageCountBefore = countMessages(state.prompt);
+        const estimatedTokensBefore = estimate(state.prompt);
         const execution: ContextManagementStrategyExecution | void = await strategy.apply(state);
-        const promptAfter = clonePrompt(state.prompt);
-        const estimatedTokensAfter = estimate(promptAfter);
+        const estimatedTokensAfter = estimate(state.prompt);
+        const messageCountAfter = countMessages(state.prompt);
         const removedAfter = state.removedToolExchanges.length;
         const pinnedAfter = state.pinnedToolCallIds.size;
-        const changed = !promptsEqual(promptBefore, promptAfter)
+        const changed = estimatedTokensBefore !== estimatedTokensAfter
+          || messageCountBefore !== messageCountAfter
           || removedAfter !== removedBefore
           || pinnedAfter !== pinnedBefore;
 
@@ -320,9 +318,9 @@ export function createContextManagementRuntime(
           removedToolExchangesDelta: removedAfter - removedBefore,
           removedToolExchangesTotal: removedAfter,
           pinnedToolCallIdsDelta: pinnedAfter - pinnedBefore,
+          messageCountBefore,
+          messageCountAfter,
           payloads: {
-            promptBefore,
-            promptAfter,
             ...(execution?.payloads ? { strategy: cloneUnknown(execution.payloads) } : {}),
           },
         }));
@@ -331,14 +329,12 @@ export function createContextManagementRuntime(
       await emitTelemetry(options.telemetry, () => ({
         type: "runtime-complete",
         requestContext,
-        estimatedTokensBefore: estimate(initialPrompt),
+        estimatedTokensBefore: initialTokenEstimate,
         estimatedTokensAfter: estimate(state.prompt),
         removedToolExchangesTotal: state.removedToolExchanges.length,
         pinnedToolCallIdsTotal: state.pinnedToolCallIds.size,
-        payloads: {
-          promptBefore: initialPrompt,
-          promptAfter: clonePrompt(state.prompt),
-        },
+        messageCountBefore: initialMessageCount,
+        messageCountAfter: countMessages(state.prompt),
       }));
 
       return state.params;

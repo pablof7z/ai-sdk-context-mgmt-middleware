@@ -33,6 +33,7 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
       }
     );
 
+    const messagesRemoved = state.prompt.length - result.prompt.length;
     state.updatePrompt(result.prompt);
     state.addRemovedToolExchanges(result.removedToolExchanges);
 
@@ -42,6 +43,7 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
       payloads: {
         keepLastMessages: this.keepLastMessages,
         maxPromptTokens: this.maxPromptTokens,
+        messagesRemoved,
       },
     };
   }

@@ -74,13 +74,8 @@ function cloneUnknown(value) {
     }
     return value;
 }
-function promptsEqual(a, b) {
-    try {
-        return JSON.stringify(a) === JSON.stringify(b);
-    }
-    catch {
-        return false;
-    }
+function countMessages(prompt) {
+    return prompt.length;
 }
 function extractRequestContextFromExperimentalContext(experimentalContext) {
     if (!experimentalContext ||
@@ -212,31 +207,33 @@ export function createContextManagementRuntime(options) {
                 provider: model.provider,
                 modelId: model.modelId,
             }, options.reminderSink);
-            const initialPrompt = clonePrompt(state.prompt);
             const toolTokenOverhead = estimator.estimateTools?.(params.tools) ?? 0;
             const estimate = (prompt) => estimator.estimatePrompt(prompt) + toolTokenOverhead;
+            const initialTokenEstimate = estimate(state.prompt);
+            const initialMessageCount = countMessages(state.prompt);
             await emitTelemetry(options.telemetry, () => ({
                 type: "runtime-start",
                 requestContext,
                 strategyNames: strategies.map((strategy) => strategy.name ?? "unnamed-strategy"),
                 optionalToolNames: Object.keys(optionalTools),
-                estimatedTokensBefore: estimate(initialPrompt),
+                estimatedTokensBefore: initialTokenEstimate,
+                messageCount: initialMessageCount,
                 payloads: {
-                    prompt: initialPrompt,
                     providerOptions: cloneUnknown(params.providerOptions),
                 },
             }));
             for (const strategy of strategies) {
-                const promptBefore = clonePrompt(state.prompt);
                 const removedBefore = state.removedToolExchanges.length;
                 const pinnedBefore = state.pinnedToolCallIds.size;
-                const estimatedTokensBefore = estimate(promptBefore);
+                const messageCountBefore = countMessages(state.prompt);
+                const estimatedTokensBefore = estimate(state.prompt);
                 const execution = await strategy.apply(state);
-                const promptAfter = clonePrompt(state.prompt);
-                const estimatedTokensAfter = estimate(promptAfter);
+                const estimatedTokensAfter = estimate(state.prompt);
+                const messageCountAfter = countMessages(state.prompt);
                 const removedAfter = state.removedToolExchanges.length;
                 const pinnedAfter = state.pinnedToolCallIds.size;
-                const changed = !promptsEqual(promptBefore, promptAfter)
+                const changed = estimatedTokensBefore !== estimatedTokensAfter
+                    || messageCountBefore !== messageCountAfter
                     || removedAfter !== removedBefore
                     || pinnedAfter !== pinnedBefore;
                 await emitTelemetry(options.telemetry, () => ({
@@ -251,9 +248,9 @@ export function createContextManagementRuntime(options) {
                     removedToolExchangesDelta: removedAfter - removedBefore,
                     removedToolExchangesTotal: removedAfter,
                     pinnedToolCallIdsDelta: pinnedAfter - pinnedBefore,
+                    messageCountBefore,
+                    messageCountAfter,
                     payloads: {
-                        promptBefore,
-                        promptAfter,
                         ...(execution?.payloads ? { strategy: cloneUnknown(execution.payloads) } : {}),
                     },
                 }));
@@ -261,14 +258,12 @@ export function createContextManagementRuntime(options) {
             await emitTelemetry(options.telemetry, () => ({
                 type: "runtime-complete",
                 requestContext,
-                estimatedTokensBefore: estimate(initialPrompt),
+                estimatedTokensBefore: initialTokenEstimate,
                 estimatedTokensAfter: estimate(state.prompt),
                 removedToolExchangesTotal: state.removedToolExchanges.length,
                 pinnedToolCallIdsTotal: state.pinnedToolCallIds.size,
-                payloads: {
-                    promptBefore: initialPrompt,
-                    promptAfter: clonePrompt(state.prompt),
-                },
+                messageCountBefore: initialMessageCount,
+                messageCountAfter: countMessages(state.prompt),
             }));
             return state.params;
         },

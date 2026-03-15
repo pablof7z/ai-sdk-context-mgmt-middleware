@@ -353,17 +353,16 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
         : "scratchpad-rendered",
       ...(this.workingTokenBudget !== undefined ? { workingTokenBudget: this.workingTokenBudget } : {}),
       payloads: {
-        currentState,
-        otherScratchpads: allScratchpads,
-        appliedOmitToolCallIds,
-        appliedKeepLastMessages: currentState.keepLastMessages,
+        notesCharCount: currentState.notes.length,
+        keepLastMessages: currentState.keepLastMessages,
+        appliedOmitCount: appliedOmitToolCallIds.length,
+        otherScratchpadCount: allScratchpads.length,
         reminderTone: this.reminderTone,
-        reminderText: reminderBlock,
         estimatedTokens,
         forceToolThresholdRatio: this.forceToolThresholdRatio,
         forceThresholdTokens,
         forcedToolChoice: shouldForceToolChoice,
-        latestToolActivity,
+        latestToolName: latestToolActivity?.toolName,
       },
     };
   }

@@ -17,6 +17,7 @@ export class SlidingWindowStrategy {
             maxPromptTokens: this.maxPromptTokens,
             pinnedToolCallIds: state.pinnedToolCallIds,
         });
+        const messagesRemoved = state.prompt.length - result.prompt.length;
         state.updatePrompt(result.prompt);
         state.addRemovedToolExchanges(result.removedToolExchanges);
         return {
@@ -25,6 +26,7 @@ export class SlidingWindowStrategy {
             payloads: {
                 keepLastMessages: this.keepLastMessages,
                 maxPromptTokens: this.maxPromptTokens,
+                messagesRemoved,
             },
         };
     }
