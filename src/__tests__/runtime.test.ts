@@ -119,9 +119,11 @@ describe("createContextManagementRuntime", () => {
         agentId: "agent-1",
         agentLabel: "Alpha",
       });
-      expect(completeEvent.payloads.result).toEqual({
-        ok: true,
-      });
+      expect(completeEvent.payloads.result).toEqual(
+        expect.objectContaining({
+          ok: true,
+        })
+      );
     }
   });
 

@@ -305,9 +305,9 @@ export interface ScratchpadStore {
 export interface ScratchpadStrategyOptions {
   scratchpadStore: ScratchpadStore;
   reminderTone?: "informational" | "urgent" | "silent";
-  maxRemovedToolReminderItems?: number;
   workingTokenBudget?: number;
   forceToolThresholdRatio?: number;
+  preserveHeadCount?: number;
   estimator?: PromptTokenEstimator;
 }
 
@@ -317,6 +317,6 @@ export interface ScratchpadToolInput {
   omitToolCallIds?: string[];
 }
 
-export interface ScratchpadToolResult {
-  ok: true;
-}
+export type ScratchpadToolResult =
+  | { ok: true; state: ScratchpadState }
+  | { ok: false; error: string; state: ScratchpadState };

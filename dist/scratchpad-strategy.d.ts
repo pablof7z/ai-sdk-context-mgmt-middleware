@@ -4,11 +4,12 @@ export declare class ScratchpadStrategy implements ContextManagementStrategy {
     readonly name = "scratchpad";
     private readonly scratchpadStore;
     private readonly reminderTone;
-    private readonly maxRemovedToolReminderItems;
     private readonly workingTokenBudget?;
     private readonly forceToolThresholdRatio?;
+    private readonly preserveHeadCount;
     private readonly estimator;
     private readonly optionalTools;
+    private forcedOnLastApply;
     constructor(options: ScratchpadStrategyOptions);
     getOptionalTools(): ToolSet;
     apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;

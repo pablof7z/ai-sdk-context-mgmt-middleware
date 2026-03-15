@@ -2,7 +2,7 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import {
   getLatestToolActivity,
   removeToolExchanges,
-  trimPromptToLastMessages,
+  trimPromptHeadAndTail,
 } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import { CONTEXT_MANAGEMENT_KEY } from "./types.js";
@@ -21,7 +21,7 @@ import type {
   ScratchpadToolResult,
 } from "./types.js";
 
-const DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS = 10;
+const DEFAULT_PRESERVE_HEAD_COUNT = 2;
 
 function dedupeStrings(values: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -106,21 +106,18 @@ function buildReminderBlock(options: {
   currentState: ScratchpadState;
   currentContext: ContextManagementRequestContext;
   otherScratchpads: ScratchpadConversationEntry[];
-  removedToolExchanges: readonly { toolCallId: string; toolName: string }[];
   reminderTone: "informational" | "urgent" | "silent";
-  maxRemovedToolReminderItems: number;
+  forced?: boolean;
 }): string {
   const {
     currentState,
     currentContext,
     otherScratchpads,
-    removedToolExchanges,
     reminderTone,
-    maxRemovedToolReminderItems,
+    forced,
   } = options;
 
   const lines = [
-    "[Context management]",
     `Your scratchpad (${currentContext.agentLabel ?? currentContext.agentId}):`,
     currentState.notes || "(empty)",
   ];
@@ -139,25 +136,19 @@ function buildReminderBlock(options: {
     }
   }
 
-  if (removedToolExchanges.length > 0) {
-    const visible = removedToolExchanges.slice(0, maxRemovedToolReminderItems);
-    lines.push("Removed tool exchanges:");
-    for (const exchange of visible) {
-      lines.push(`- ${exchange.toolName} (${exchange.toolCallId})`);
-    }
-
-    const overflow = removedToolExchanges.length - visible.length;
-    if (overflow > 0) {
-      lines.push(`and ${overflow} more`);
-    }
-  }
-
-  if (reminderTone === "informational") {
+  if (forced) {
+    lines.push(
+      "CRITICAL: Context is nearly full. You MUST:",
+      "1. Record any side-effect actions in notes (file writes, API calls, etc.)",
+      "2. Set keepLastMessages to trim old messages (e.g. 5-10)",
+      "3. Add completed tool call IDs to omitToolCallIds",
+      "Failure to free context will result in an error."
+    );
+  } else if (reminderTone === "informational") {
     lines.push("You can update these notes or future omissions with scratchpad(...). Notes persist within this conversation only — they do not carry over to new conversations.");
   } else if (reminderTone === "urgent") {
     lines.push("Use scratchpad(...) now to preserve progress within this conversation or proactively remove stale context. Notes do not carry over to new conversations.");
   }
-  lines.push("[/Context management]");
   return lines.join("\n");
 }
 
@@ -165,11 +156,12 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
   readonly name = "scratchpad";
   private readonly scratchpadStore: ScratchpadStore;
   private readonly reminderTone: "informational" | "urgent" | "silent";
-  private readonly maxRemovedToolReminderItems: number;
   private readonly workingTokenBudget?: number;
   private readonly forceToolThresholdRatio?: number;
+  private readonly preserveHeadCount: number;
   private readonly estimator: PromptTokenEstimator;
   private readonly optionalTools: ToolSet;
+  private forcedOnLastApply = false;
 
   constructor(options: ScratchpadStrategyOptions) {
     const normalizedWorkingTokenBudget = typeof options.workingTokenBudget === "number"
@@ -188,21 +180,20 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
 
     this.scratchpadStore = options.scratchpadStore;
     this.reminderTone = options.reminderTone ?? "informational";
-    this.maxRemovedToolReminderItems =
-      options.maxRemovedToolReminderItems ?? DEFAULT_MAX_REMOVED_TOOL_REMINDER_ITEMS;
     this.workingTokenBudget = normalizedWorkingTokenBudget;
     this.forceToolThresholdRatio = normalizedForceThresholdRatio;
+    this.preserveHeadCount = Math.max(0, Math.floor(options.preserveHeadCount ?? DEFAULT_PRESERVE_HEAD_COUNT));
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
     this.optionalTools = {
       scratchpad: tool<ScratchpadToolInput, ScratchpadToolResult>({
-        description: "Update your scratchpad and proactively remove older context from future turns. Scratchpad notes persist within this conversation only — they do not carry over to new conversations.",
+        description: "Manage your working memory and context window. Use notes to persist information across context pruning. Use keepLastMessages and omitToolCallIds to free context when it grows too large.\n\nIMPORTANT: Before pruning context, record in your notes any actions you took that had side effects (file writes, API calls, published events, state changes) so you don't forget or repeat them.\n\nkeepLastMessages preserves the original conversation start and your most recent N messages, removing everything in between.",
         inputSchema: jsonSchema({
           type: "object",
           additionalProperties: false,
           properties: {
             notes: {
               type: "string",
-              description: "Replacement scratchpad text for your agent.",
+              description: "Your working memory. Record task objectives, progress, and importantly any actions with side effects (file writes, API calls, state changes). This persists even when messages are pruned.",
             },
             keepLastMessages: {
               anyOf: [
@@ -214,14 +205,14 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
                   type: "null",
                 },
               ],
-              description: "Optional cap on visible non-system messages. Use null to clear it.",
+              description: "Number of recent non-system messages to keep. The conversation start (original task) is always preserved. Messages in between are dropped. Use null to clear.",
             },
             omitToolCallIds: {
               type: "array",
               items: {
                 type: "string",
               },
-              description: "Replacement list of tool call IDs to remove from future context.",
+              description: "Tool call IDs whose request and result should be removed from context. Use for completed tool calls whose results you've already captured in notes.",
             },
           },
         }),
@@ -247,8 +238,26 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
 
           await this.scratchpadStore.set(key, nextState);
 
+          // Check if this was a forced call and the agent didn't provide pruning params
+          const wasForcedCall = this.forcedOnLastApply;
+          this.forcedOnLastApply = false;
+
+          if (wasForcedCall) {
+            const hasPruningParams = input.keepLastMessages !== undefined
+              || (input.omitToolCallIds !== undefined && input.omitToolCallIds.length > 0);
+
+            if (!hasPruningParams) {
+              return {
+                ok: false,
+                error: "Context is critically full. You MUST free context by setting keepLastMessages (integer) to trim old messages, and/or omitToolCallIds (array of tool call IDs) to remove completed tool results. Notes were saved, but you need to call scratchpad again with pruning parameters.",
+                state: nextState,
+              };
+            }
+          }
+
           return {
             ok: true,
+            state: nextState,
           };
         },
       }),
@@ -286,8 +295,9 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
     }
 
     if (typeof currentState.keepLastMessages === "number") {
-      const trimResult = trimPromptToLastMessages(
+      const trimResult = trimPromptHeadAndTail(
         state.prompt,
+        this.preserveHeadCount,
         currentState.keepLastMessages,
         "scratchpad",
         {
@@ -297,20 +307,6 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
       state.updatePrompt(trimResult.prompt);
       state.addRemovedToolExchanges(trimResult.removedToolExchanges);
     }
-
-    const reminderBlock = buildReminderBlock({
-      currentState,
-      currentContext: state.requestContext,
-      otherScratchpads: allScratchpads,
-      removedToolExchanges: state.removedToolExchanges,
-      reminderTone: this.reminderTone,
-      maxRemovedToolReminderItems: this.maxRemovedToolReminderItems,
-    });
-
-    await state.emitReminder({
-      kind: "scratchpad",
-      content: reminderBlock,
-    });
 
     const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
       + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
@@ -327,7 +323,21 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
       && !alreadyForcedToScratchpad
       && !justCalledScratchpad;
 
+    const reminderBlock = buildReminderBlock({
+      currentState,
+      currentContext: state.requestContext,
+      otherScratchpads: allScratchpads,
+      reminderTone: this.reminderTone,
+      forced: shouldForceToolChoice,
+    });
+
+    await state.emitReminder({
+      kind: "scratchpad",
+      content: reminderBlock,
+    });
+
     if (shouldForceToolChoice) {
+      this.forcedOnLastApply = true;
       state.updateParams({
         toolChoice: {
           type: "tool",

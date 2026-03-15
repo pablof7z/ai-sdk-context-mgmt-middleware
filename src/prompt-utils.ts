@@ -463,6 +463,139 @@ export function trimPromptToLastMessages(
   return bestResult;
 }
 
+export function trimPromptHeadAndTail(
+  prompt: LanguageModelV3Prompt,
+  headCount: number,
+  tailCount: number,
+  reason: string,
+  options?: {
+    pinnedToolCallIds?: ReadonlySet<string>;
+  }
+): { prompt: LanguageModelV3Prompt; removedToolExchanges: RemovedToolExchange[] } {
+  const normalizedHead = Math.max(0, Math.floor(headCount));
+  const normalizedTail = Math.max(0, Math.floor(tailCount));
+
+  const nonSystemIndices: number[] = [];
+  for (let i = 0; i < prompt.length; i++) {
+    if (prompt[i].role !== "system") {
+      nonSystemIndices.push(i);
+    }
+  }
+
+  if (nonSystemIndices.length <= normalizedHead + normalizedTail) {
+    return {
+      prompt: clonePrompt(prompt),
+      removedToolExchanges: [],
+    };
+  }
+
+  const exchanges = collectToolExchanges(prompt);
+
+  // Determine head boundary: first headCount non-system messages (exclusive index into nonSystemIndices)
+  let headEndNonSystem = normalizedHead;
+
+  // Expand head boundary forward to avoid splitting tool exchanges
+  for (;;) {
+    let expanded = false;
+    for (const exchange of exchanges.values()) {
+      if (exchange.callMessageIndex === undefined) continue;
+
+      const callNsIdx = nonSystemIndices.indexOf(exchange.callMessageIndex);
+      const resultNsIndices = exchange.resultMessageIndices
+        .map((ri) => nonSystemIndices.indexOf(ri))
+        .filter((i) => i !== -1);
+
+      if (callNsIdx !== -1 && callNsIdx < headEndNonSystem) {
+        for (const rni of resultNsIndices) {
+          if (rni >= headEndNonSystem && rni < nonSystemIndices.length - normalizedTail) {
+            headEndNonSystem = rni + 1;
+            expanded = true;
+          }
+        }
+      }
+
+      for (const rni of resultNsIndices) {
+        if (rni < headEndNonSystem && callNsIdx >= headEndNonSystem && callNsIdx < nonSystemIndices.length - normalizedTail) {
+          headEndNonSystem = callNsIdx + 1;
+          expanded = true;
+        }
+      }
+    }
+    if (!expanded) break;
+  }
+
+  // Determine tail boundary: last tailCount non-system messages (inclusive index into nonSystemIndices)
+  let tailStartNonSystem = nonSystemIndices.length - normalizedTail;
+
+  // Expand tail boundary backward to avoid splitting tool exchanges
+  for (;;) {
+    let expanded = false;
+    for (const exchange of exchanges.values()) {
+      if (exchange.callMessageIndex === undefined) continue;
+
+      const callNsIdx = nonSystemIndices.indexOf(exchange.callMessageIndex);
+      const resultNsIndices = exchange.resultMessageIndices
+        .map((ri) => nonSystemIndices.indexOf(ri))
+        .filter((i) => i !== -1);
+
+      for (const rni of resultNsIndices) {
+        if (rni >= tailStartNonSystem && callNsIdx !== -1 && callNsIdx < tailStartNonSystem && callNsIdx >= headEndNonSystem) {
+          tailStartNonSystem = callNsIdx;
+          expanded = true;
+        }
+      }
+
+      if (callNsIdx !== -1 && callNsIdx >= tailStartNonSystem) {
+        for (const rni of resultNsIndices) {
+          if (rni < tailStartNonSystem && rni >= headEndNonSystem) {
+            tailStartNonSystem = rni;
+            expanded = true;
+          }
+        }
+      }
+    }
+    if (!expanded) break;
+  }
+
+  // If boundaries overlap or meet, nothing to drop
+  if (headEndNonSystem >= tailStartNonSystem) {
+    return {
+      prompt: clonePrompt(prompt),
+      removedToolExchanges: [],
+    };
+  }
+
+  const keptIndices = getPinnedMessageIndices(prompt, options?.pinnedToolCallIds ?? new Set<string>());
+
+  for (let i = 0; i < headEndNonSystem; i++) {
+    keptIndices.add(nonSystemIndices[i]);
+  }
+
+  for (let i = tailStartNonSystem; i < nonSystemIndices.length; i++) {
+    keptIndices.add(nonSystemIndices[i]);
+  }
+
+  const nextPrompt = buildPromptFromSelectedIndices(prompt, keptIndices);
+
+  // Build removed tool exchanges
+  const nextExchanges = collectToolExchanges(nextPrompt);
+  const removedToolExchanges: RemovedToolExchange[] = [];
+  for (const exchange of exchanges.values()) {
+    if (!nextExchanges.has(exchange.toolCallId)) {
+      removedToolExchanges.push({
+        toolCallId: exchange.toolCallId,
+        toolName: exchange.toolName,
+        reason,
+      });
+    }
+  }
+
+  return {
+    prompt: nextPrompt,
+    removedToolExchanges,
+  };
+}
+
 export function partitionPromptForSummarization(
   prompt: LanguageModelV3Prompt,
   keepLastMessages: number,
