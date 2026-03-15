@@ -1,5 +1,5 @@
 import type { LanguageModelV3ToolResultOutput } from "@ai-sdk/provider";
-import { clonePrompt, collectToolExchanges } from "./prompt-utils.js";
+import { clonePrompt, collectToolExchanges, type ToolExchange } from "./prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "./token-estimator.js";
 import type {
   ContextManagementStrategy,
@@ -226,18 +226,34 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       };
     }
 
-    // Sort exchanges by their result message position, most recent last.
-    const sorted = [...exchanges.values()].sort((a, b) => {
-      const aMax = Math.max(...a.resultMessageIndices, a.callMessageIndex ?? -1);
-      const bMax = Math.max(...b.resultMessageIndices, b.callMessageIndex ?? -1);
-      return aMax - bMax;
-    });
-
-    // Assign depth from the end: depth 0 = most recent
-    const depthMap = new Map<string, number>();
-    for (let i = 0; i < sorted.length; i++) {
-      depthMap.set(sorted[i].toolCallId, sorted.length - 1 - i);
+    // Group exchanges by their call message index so that all tool calls issued
+    // in the same assistant turn (same batch) share the same depth.  This
+    // prevents a large parallel batch from being immediately decayed because
+    // individual calls within the batch get different positional depths.
+    const turnGroups = new Map<number, ToolExchange[]>();
+    for (const exchange of exchanges.values()) {
+      const turnKey = exchange.callMessageIndex ?? -1;
+      const group = turnGroups.get(turnKey) ?? [];
+      group.push(exchange);
+      turnGroups.set(turnKey, group);
     }
+
+    // Sort groups oldest-first by call message index.
+    const sortedGroups = [...turnGroups.entries()].sort(([a], [b]) => a - b);
+
+    // Assign depth per group: depth 0 = most recent group.
+    // Every call within the same batch gets the same depth.
+    const depthMap = new Map<string, number>();
+    const numGroups = sortedGroups.length;
+    for (let groupIdx = 0; groupIdx < numGroups; groupIdx++) {
+      const depth = numGroups - 1 - groupIdx;
+      for (const exchange of sortedGroups[groupIdx][1]) {
+        depthMap.set(exchange.toolCallId, depth);
+      }
+    }
+
+    // Flatten groups into a single list for the loops below.
+    const sorted = sortedGroups.flatMap(([, group]) => group);
 
     const baseMaxChars = this.truncatedMaxTokens * CHARS_PER_TOKEN;
     const placeholderFloorChars = this.placeholderFloorTokens * CHARS_PER_TOKEN;

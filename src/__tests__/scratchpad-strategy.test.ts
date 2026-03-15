@@ -120,11 +120,6 @@ describe("ScratchpadStrategy", () => {
     expect(result).toEqual(
       expect.objectContaining({
         ok: true,
-        state: expect.objectContaining({
-          notes: "Focus on parser cleanup",
-          keepLastMessages: 3,
-          omitToolCallIds: ["call-1"],
-        }),
       })
     );
     expect(await store.get({ conversationId: "conv-1", agentId: "agent-1" })).toEqual(
@@ -522,8 +517,9 @@ describe("ScratchpadStrategy", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toContain("Context is critically full");
       expect(result.error).toContain("keepLastMessages");
-      // Notes should still be saved
-      expect(result.state).toEqual(
+      // Notes should still be saved in the store
+      const saved = await store.get({ conversationId: "conv-1", agentId: "agent-1" });
+      expect(saved).toEqual(
         expect.objectContaining({
           notes: "I saved my progress but didn't prune",
         })
@@ -567,7 +563,8 @@ describe("ScratchpadStrategy", () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(result.state).toEqual(
+      const saved = await store.get({ conversationId: "conv-1", agentId: "agent-1" });
+      expect(saved).toEqual(
         expect.objectContaining({
           notes: "Saved progress",
           keepLastMessages: 5,

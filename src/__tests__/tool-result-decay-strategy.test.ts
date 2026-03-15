@@ -118,6 +118,38 @@ function makeToolPromptWithInputs(
   return prompt;
 }
 
+function makeToolPromptWithBatchCalls(
+  batches: Array<Array<{ id: string; name: string; output: LanguageModelV3ToolResultOutput }>>
+): LanguageModelV3Prompt {
+  const prompt: LanguageModelV3Prompt = [
+    { role: "system", content: "You are helpful." },
+    { role: "user", content: [{ type: "text", text: "initial request" }] },
+  ];
+
+  for (const batch of batches) {
+    // All tool calls in one assistant message (same turn/batch, same callMessageIndex)
+    prompt.push({
+      role: "assistant",
+      content: batch.map(({ id, name }) => ({
+        type: "tool-call",
+        toolCallId: id,
+        toolName: name,
+        input: {},
+      })),
+    });
+    // Each tool result in its own message
+    for (const { id, name, output } of batch) {
+      prompt.push({
+        role: "tool",
+        content: [{ type: "tool-result", toolCallId: id, toolName: name, output }],
+      });
+    }
+  }
+
+  prompt.push({ role: "user", content: [{ type: "text", text: "final question" }] });
+  return prompt;
+}
+
 function makeToolPromptWithOutputs(
   outputs: Array<{ id: string; name: string; output: LanguageModelV3ToolResultOutput }>
 ): LanguageModelV3Prompt {
@@ -903,6 +935,38 @@ describe("ToolResultDecayStrategy", () => {
 
     expect(capturedReminders).toHaveLength(1);
     expect(capturedReminders[0].content).toContain("[read_file id:call-0]");
+  });
+
+  test("all calls in the same batch turn share depth 0 and are never immediately decayed", async () => {
+    const largeOutput = "x".repeat(5000);
+    // Turn 1: one previous call
+    // Turn 2: 50 parallel fs_reads in one batch (same assistant message)
+    const batches = [
+      [{ id: "prev-call", name: "tool_prev", output: { type: "text" as const, value: "previous result" } }],
+      Array.from({ length: 50 }, (_, i) => ({
+        id: `batch-${i}`,
+        name: "fs_read",
+        output: { type: "text" as const, value: largeOutput },
+      })),
+    ];
+    const prompt = makeToolPromptWithBatchCalls(batches);
+    const strategy = new ToolResultDecayStrategy();
+    const { state, capturedRemoved } = createMockState(prompt);
+
+    await strategy.apply(state);
+
+    // All 50 batch calls are depth 0 (most recent group) → all preserved in full
+    for (let i = 0; i < 50; i++) {
+      expect(getToolResultOutput(state.prompt, `batch-${i}`)).toBe(largeOutput);
+    }
+
+    // The previous call is depth 1 → truncated (5000 > budget of 800)
+    const prevOutput = getToolResultOutput(state.prompt, "prev-call");
+    expect(prevOutput).toBeDefined();
+    expect(prevOutput!.length).toBeLessThanOrEqual(800);
+
+    // No batch call should appear in removed exchanges
+    expect(capturedRemoved.filter((e) => e.toolCallId.startsWith("batch-"))).toHaveLength(0);
   });
 
   test("payloads include inputTruncatedCount and inputPlaceholderCount", async () => {

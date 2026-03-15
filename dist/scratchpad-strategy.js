@@ -178,13 +178,11 @@ export class ScratchpadStrategy {
                             return {
                                 ok: false,
                                 error: "Context is critically full. You MUST free context by setting keepLastMessages (integer) to trim old messages, and/or omitToolCallIds (array of tool call IDs) to remove completed tool results. Notes were saved, but you need to call scratchpad again with pruning parameters.",
-                                state: nextState,
                             };
                         }
                     }
                     return {
                         ok: true,
-                        state: nextState,
                     };
                 },
             }),

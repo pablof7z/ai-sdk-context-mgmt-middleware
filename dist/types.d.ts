@@ -260,9 +260,7 @@ export interface ScratchpadToolInput {
 }
 export type ScratchpadToolResult = {
     ok: true;
-    state: ScratchpadState;
 } | {
     ok: false;
     error: string;
-    state: ScratchpadState;
 };
