@@ -1,4 +1,4 @@
-import { HeadAndTailStrategy, SlidingWindowStrategy } from "../index.js";
+import { SlidingWindowStrategy } from "../index.js";
 import { createContextManagementRuntime } from "../runtime.js";
 import { makePrompt } from "./helpers.js";
 
@@ -112,39 +112,5 @@ describe("SlidingWindowStrategy", () => {
       "tool",
       "user",
     ]);
-  });
-
-  test("matches HeadAndTailStrategy when headCount is set", () => {
-    const slidingState = {
-      prompt: makePrompt(),
-      removedToolExchanges: [],
-      params: { prompt: makePrompt(), providerOptions: {} },
-      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
-      pinnedToolCallIds: new Set<string>(),
-      updatePrompt(prompt: any) {
-        this.prompt = prompt;
-      },
-      updateParams() {},
-      addRemovedToolExchanges() {},
-      addPinnedToolCallIds() {},
-    };
-    const headAndTailState = {
-      prompt: makePrompt(),
-      removedToolExchanges: [],
-      params: { prompt: makePrompt(), providerOptions: {} },
-      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
-      pinnedToolCallIds: new Set<string>(),
-      updatePrompt(prompt: any) {
-        this.prompt = prompt;
-      },
-      updateParams() {},
-      addRemovedToolExchanges() {},
-      addPinnedToolCallIds() {},
-    };
-
-    new SlidingWindowStrategy({ headCount: 1, keepLastMessages: 2 }).apply(slidingState as any);
-    new HeadAndTailStrategy({ headCount: 1, tailCount: 2 }).apply(headAndTailState as any);
-
-    expect(slidingState.prompt).toEqual(headAndTailState.prompt);
   });
 });

@@ -31,17 +31,17 @@ interface ToolResultDecayStrategyOptions {
 
 Three zones: full → truncated → placeholder. Maps to Manus's graduated hierarchy and JetBrains's observation masking finding.
 
-### HeadAndTailStrategy
+### SlidingWindowStrategy with head preservation
 
 Keep first N + last M non-system messages, drop the middle. Based on the "lost in the middle" research (Liu et al., 2024) showing LLM performance follows a U-shaped curve — best at beginning and end of context.
 
 ```ts
-interface HeadAndTailStrategyOptions {
+interface SlidingWindowStrategyOptions {
   // Non-system messages to keep from the start. Default: 2
   headCount?: number;
 
   // Non-system messages to keep from the end. Default: 8
-  tailCount?: number;
+  keepLastMessages?: number;
 }
 ```
 
@@ -201,7 +201,7 @@ Typical stacks users might configure:
 `SystemPromptCachingStrategy` → `CompactionToolStrategy` → `PinnedMessagesStrategy`
 
 **Maximum automatic management:**
-`SystemPromptCachingStrategy` → `HeadAndTailStrategy` → `SummarizationStrategy`
+`SystemPromptCachingStrategy` → `SlidingWindowStrategy({ headCount })` → `SummarizationStrategy`
 
 ## Strategy ordering contract
 

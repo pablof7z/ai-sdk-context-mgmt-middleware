@@ -151,10 +151,6 @@ export interface ToolResultDecayStrategyOptions {
     decayInputs?: boolean;
     estimator?: PromptTokenEstimator;
 }
-export interface HeadAndTailStrategyOptions {
-    headCount?: number;
-    tailCount?: number;
-}
 export interface SystemPromptCachingStrategyOptions {
     consolidateSystemMessages?: boolean;
 }

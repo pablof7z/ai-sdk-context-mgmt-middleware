@@ -39,7 +39,7 @@ npx tsx 01-sliding-window.ts
 - shows a graduated stack with telemetry
 - look for multiple effects in one prompt: normalized system prefix, compressed tool results, summary, scratchpad reminder, and utilization warning
 
-### `05-head-and-tail.ts`
+### `05-sliding-window-head.ts`
 
 - shows setup context plus recent context staying in view
 - look for the middle status updates disappearing

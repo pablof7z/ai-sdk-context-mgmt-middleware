@@ -6,7 +6,6 @@ Available strategies:
 
 - [SystemPromptCachingStrategy](./system-prompt-caching/README.md)
 - [SlidingWindowStrategy](./sliding-window/README.md)
-- [HeadAndTailStrategy](./head-and-tail/README.md)
 - [ToolResultDecayStrategy](./tool-result-decay/README.md)
 - [SummarizationStrategy](./summarization/README.md)
 - [LLMSummarizationStrategy](./llm-summarization/README.md)

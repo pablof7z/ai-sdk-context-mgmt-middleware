@@ -54,7 +54,7 @@ function textOf(message: any): string | undefined {
 }
 
 /**
- * Build a 10-message (non-system) prompt for head-and-tail testing.
+ * Build a 10-message (non-system) prompt for head-preserving trim testing.
  * Layout:
  *   0: system
  *   1: user "msg-1"       (original task)
@@ -423,7 +423,7 @@ describe("ScratchpadStrategy", () => {
     );
   });
 
-  describe("head-and-tail trimming", () => {
+  describe("head-preserving trimming", () => {
     test("keepLastMessages=2 preserves head and tail, drops middle", async () => {
       const store = new InMemoryScratchpadStore();
       await store.set(

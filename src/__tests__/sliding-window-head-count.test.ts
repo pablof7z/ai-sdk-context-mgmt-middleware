@@ -1,5 +1,5 @@
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
-import { HeadAndTailStrategy } from "../index.js";
+import { SlidingWindowStrategy } from "../index.js";
 import type { RemovedToolExchange } from "../types.js";
 
 function makeState(prompt: LanguageModelV3Prompt, pinnedIds: string[] = []) {
@@ -82,10 +82,10 @@ function textOf(message: any): string | undefined {
   return undefined;
 }
 
-describe("HeadAndTailStrategy", () => {
+describe("SlidingWindowStrategy with headCount", () => {
   test("keeps head and tail messages, drops the middle", () => {
     // head=2, tail=4 => keep first 2 + last 4 non-system, drop middle 6
-    const strategy = new HeadAndTailStrategy({ headCount: 2, tailCount: 4 });
+    const strategy = new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 4 });
     const prompt = makeLargePrompt();
     const { state } = makeState(prompt);
 
@@ -121,7 +121,7 @@ describe("HeadAndTailStrategy", () => {
     ];
 
     // 8 non-system messages, head=1, tail=2 => drop middle 5
-    const strategy = new HeadAndTailStrategy({ headCount: 1, tailCount: 2 });
+    const strategy = new SlidingWindowStrategy({ headCount: 1, keepLastMessages: 2 });
     const { state } = makeState(prompt);
 
     strategy.apply(state);
@@ -167,7 +167,7 @@ describe("HeadAndTailStrategy", () => {
     // 9 non-system messages. head=2, tail=3 => normally keep non-system 0-1, 6-8
     // But non-system index 1 is tool-call:call-edge, result is at non-system index 2
     // So head should expand to include index 2
-    const strategy = new HeadAndTailStrategy({ headCount: 2, tailCount: 3 });
+    const strategy = new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 3 });
     const { state } = makeState(prompt);
 
     strategy.apply(state);
@@ -202,7 +202,7 @@ describe("HeadAndTailStrategy", () => {
     // 8 non-system messages. head=2, tail=3 => normally keep non-system 0-1, 5-7
     // But non-system index 5 is tool-result:call-boundary, call is at non-system index 4 (drop zone)
     // So tail should expand backward to include the call
-    const strategy = new HeadAndTailStrategy({ headCount: 2, tailCount: 3 });
+    const strategy = new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 3 });
     const { state } = makeState(prompt);
 
     strategy.apply(state);
@@ -213,7 +213,7 @@ describe("HeadAndTailStrategy", () => {
   });
 
   test("removed tool exchanges are reported", () => {
-    const strategy = new HeadAndTailStrategy({ headCount: 2, tailCount: 4 });
+    const strategy = new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 4 });
     const prompt = makeLargePrompt();
     const { state, captured } = makeState(prompt);
 
@@ -223,7 +223,7 @@ describe("HeadAndTailStrategy", () => {
     const midExchange = captured.find((e) => e.toolCallId === "call-mid");
     expect(midExchange).toBeDefined();
     expect(midExchange!.toolName).toBe("search");
-    expect(midExchange!.reason).toBe("head-and-tail");
+    expect(midExchange!.reason).toBe("sliding-window");
 
     // call-tail is in the tail and should NOT be removed
     const tailExchange = captured.find((e) => e.toolCallId === "call-tail");
@@ -231,7 +231,7 @@ describe("HeadAndTailStrategy", () => {
   });
 
   test("pinned exchanges stay in the prompt even when they fall in the dropped middle", () => {
-    const strategy = new HeadAndTailStrategy({ headCount: 2, tailCount: 4 });
+    const strategy = new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 4 });
     const prompt = makeLargePrompt();
     const { state, captured } = makeState(prompt, ["call-mid"]);
 
@@ -243,8 +243,8 @@ describe("HeadAndTailStrategy", () => {
     expect(captured.find((exchange) => exchange.toolCallId === "call-mid")).toBeUndefined();
   });
 
-  test("no-op when messages fit within headCount + tailCount", () => {
-    const strategy = new HeadAndTailStrategy({ headCount: 5, tailCount: 10 });
+  test("no-op when messages fit within headCount + keepLastMessages", () => {
+    const strategy = new SlidingWindowStrategy({ headCount: 5, keepLastMessages: 10 });
     const prompt = makeLargePrompt(); // 12 non-system messages, 5+10=15 > 12
     const { state, captured } = makeState(prompt);
 
@@ -255,8 +255,8 @@ describe("HeadAndTailStrategy", () => {
     expect(captured).toEqual([]);
   });
 
-  test("uses default headCount=2 and tailCount=8", () => {
-    const strategy = new HeadAndTailStrategy();
+  test("uses default keepLastMessages=8 when headCount is set", () => {
+    const strategy = new SlidingWindowStrategy({ headCount: 2 });
     const prompt = makeLargePrompt(); // 12 non-system messages, 2+8=10 < 12
     const { state } = makeState(prompt);
 
@@ -269,8 +269,8 @@ describe("HeadAndTailStrategy", () => {
     expect(nonSystem.length).toBe(11);
   });
 
-  test("has name property set to head-and-tail", () => {
-    const strategy = new HeadAndTailStrategy();
-    expect(strategy.name).toBe("head-and-tail");
+  test("has name property set to sliding-window", () => {
+    const strategy = new SlidingWindowStrategy({ headCount: 2 });
+    expect(strategy.name).toBe("sliding-window");
   });
 });

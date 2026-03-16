@@ -1,10 +1,10 @@
 /**
- * Head and Tail — compatibility alias for SlidingWindowStrategy({ headCount, keepLastMessages })
+ * Sliding Window with head preservation — keep setup plus the latest turns
  */
 import { generateText, wrapLanguageModel, type ModelMessage } from "ai";
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
 import {
-  HeadAndTailStrategy,
+  SlidingWindowStrategy,
   createContextManagementRuntime,
 } from "ai-sdk-context-management";
 import {
@@ -16,7 +16,7 @@ import {
 
 async function main() {
   const runtime = createContextManagementRuntime({
-    strategies: [new HeadAndTailStrategy({ headCount: 2, tailCount: 2 })],
+    strategies: [new SlidingWindowStrategy({ headCount: 2, keepLastMessages: 2 })],
   });
 
   const capturedPrompts: LanguageModelV3Prompt[] = [];
@@ -45,7 +45,7 @@ async function main() {
     providerOptions: DEMO_CONTEXT,
   });
 
-  printPrompt("Prompt after HeadAndTailStrategy", capturedPrompts[0]);
+  printPrompt("Prompt after SlidingWindowStrategy({ headCount: 2, keepLastMessages: 2 })", capturedPrompts[0]);
   console.log("\nWhat changed:");
   console.log("- the opening brief stayed in the prompt");
   console.log("- the middle status updates were dropped");
