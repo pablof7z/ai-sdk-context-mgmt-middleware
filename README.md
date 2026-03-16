@@ -89,7 +89,7 @@ Per-strategy docs live in [`src/strategies/`](./src/strategies/README.md).
 | --- | --- | --- | --- | --- |
 | `SystemPromptCachingStrategy` | Moves system messages into a stable prefix and can consolidate them | Better cache reuse and less prompt churn | [docs](./src/strategies/system-prompt-caching/README.md) | [06-system-prompt-caching.ts](./examples/06-system-prompt-caching.ts) |
 | `SlidingWindowStrategy` | Keeps the recent tail, can optionally preserve a head, and drops older non-system turns | Bounded context with simple recency bias or setup preservation | [docs](./src/strategies/sliding-window/README.md) | [01-sliding-window.ts](./examples/01-sliding-window.ts) |
-| `ToolResultDecayStrategy` | Leaves recent tool results raw, truncates medium-age ones, masks older ones | Keeps the reasoning chain while shrinking the heaviest payloads | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
+| `ToolResultDecayStrategy` | Leaves recent tool results raw, then decays them based on depth and total tool-context pressure | Keeps the reasoning chain while shrinking the heaviest payloads only when tool usage actually grows | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
 | `SummarizationStrategy` | Replaces older turns with a tagged summary block using either `summarize(...)` or `model` | Older facts survive in compressed form without replaying the whole middle | [docs](./src/strategies/summarization/README.md) | [03-summarization.ts](./examples/03-summarization.ts), [07-model-backed-summarization.ts](./examples/07-model-backed-summarization.ts) |
 | `ScratchpadStrategy` | Injects persisted scratchpad state and can remove stale tool exchanges | Structured working state, note edits, and selective forgetting | [docs](./src/strategies/scratchpad/README.md) | [08-scratchpad.ts](./examples/08-scratchpad.ts) |
 | `PinnedMessagesStrategy` | Marks specific tool call IDs as protected before pruning | Lets the agent keep the evidence it considers critical | [docs](./src/strategies/pinned-messages/README.md) | [09-pinned-messages.ts](./examples/09-pinned-messages.ts) |
@@ -124,6 +124,39 @@ In practice that usually means:
 - Agents that self-manage context: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ScratchpadStrategy` + `CompactionToolStrategy`
 - Full graduated stack: run [`examples/04-composed-strategies.ts`](./examples/04-composed-strategies.ts)
 
+## Tool Result Decay
+
+`ToolResultDecayStrategy` now decays tool context using:
+
+- `effectiveDepth = depth * pressureFactor(toolContextTokens)`
+- default pressure anchors:
+  - `100 -> 0.05`
+  - `5_000 -> 1`
+  - `50_000 -> 5`
+
+That means low-token tool usage can remain intact for many turns, while heavy tool sessions decay aggressively much earlier.
+
+You can tune the curve with `pressureAnchors` and the warning forecast with `warningForecastExtraTokens`:
+
+```ts
+new ToolResultDecayStrategy({
+  pressureAnchors: [
+    { toolTokens: 100, depthFactor: 0.05 },
+    { toolTokens: 5_000, depthFactor: 1 },
+    { toolTokens: 50_000, depthFactor: 5 },
+  ],
+  warningForecastExtraTokens: 10_000,
+});
+```
+
+Warnings are emitted through the reminder sink with machine-readable attributes:
+
+- `tool_call_ids`
+- `truncate_ids`
+- `placeholder_ids`
+- `forecast_extra_tool_tokens`
+- `forecast_tool_context_tokens`
+
 ## Runnable Examples
 
 All examples are local and deterministic. They use mock models, print the transformed prompt, and show exactly what is interesting about the output.
@@ -131,7 +164,7 @@ All examples are local and deterministic. They use mock models, print the transf
 | Example | Run | What to look for |
 | --- | --- | --- |
 | [01-sliding-window.ts](./examples/01-sliding-window.ts) | `cd examples && npx tsx 01-sliding-window.ts` | The oldest exchange disappears, so the model only sees the recent tail |
-| [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) | `cd examples && npx tsx 02-tool-result-decay.ts` | Old tool outputs become placeholders while tool calls remain |
+| [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) | `cd examples && npx tsx 02-tool-result-decay.ts` | Pressure-aware decay keeps light tool history longer, then truncates and placeholders older heavy results |
 | [03-summarization.ts](./examples/03-summarization.ts) | `cd examples && npx tsx 03-summarization.ts` | A tagged summary system message replaces older turns |
 | [04-composed-strategies.ts](./examples/04-composed-strategies.ts) | `cd examples && npx tsx 04-composed-strategies.ts` | Multiple strategies stack cleanly and telemetry shows what ran |
 | [05-sliding-window-head.ts](./examples/05-sliding-window-head.ts) | `cd examples && npx tsx 05-sliding-window-head.ts` | Setup context and the latest blocker remain, but the middle drops out |

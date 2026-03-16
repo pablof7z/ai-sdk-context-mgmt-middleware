@@ -52,4 +52,5 @@ export type {
   SummarizationStrategyOptions,
   SystemPromptCachingStrategyOptions,
   ToolResultDecayStrategyOptions,
+  ToolResultDecayPressureAnchor,
 } from "./types.js";

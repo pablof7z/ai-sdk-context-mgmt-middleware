@@ -19,31 +19,31 @@ const LOOKUPS = [
     id: "c1",
     query: "Rust ownership",
     result:
-      "Rust's ownership system gives each value exactly one owner and drops the value when that owner leaves scope.",
+      "Rust's ownership system gives each value exactly one owner and drops the value when that owner leaves scope. ".repeat(12),
   },
   {
     id: "c2",
     query: "Rust lifetimes",
     result:
-      "Lifetimes tell the compiler how long references stay valid and prevent dangling references.",
+      "Lifetimes tell the compiler how long references stay valid and prevent dangling references. ".repeat(12),
   },
   {
     id: "c3",
     query: "Rust traits",
     result:
-      "Traits define shared behavior and support default implementations plus generic bounds.",
+      "Traits define shared behavior and support default implementations plus generic bounds. ".repeat(12),
   },
   {
     id: "c4",
     query: "Rust async",
     result:
-      "Rust async compiles futures into state machines and executors poll them to completion.",
+      "Rust async compiles futures into state machines and executors poll them to completion. ".repeat(12),
   },
   {
     id: "c5",
     query: "Rust error handling",
     result:
-      "Rust uses Result<T, E> for recoverable errors and the ? operator to propagate them ergonomically.",
+      "Rust uses Result<T, E> for recoverable errors and the ? operator to propagate them ergonomically. ".repeat(12),
   },
 ];
 
@@ -51,10 +51,17 @@ async function main() {
   const runtime = createContextManagementRuntime({
     strategies: [
       new ToolResultDecayStrategy({
-        keepFullResultCount: 1,
-        truncateWindowCount: 2,
-        truncatedMaxTokens: 12,
-        placeholder: "[result omitted]",
+        truncatedMaxTokens: 60,
+        placeholderFloorTokens: 12,
+        pressureAnchors: [
+          { toolTokens: 100, depthFactor: 1 },
+          { toolTokens: 1_000, depthFactor: 2.5 },
+        ],
+        warningForecastExtraTokens: 2_000,
+        placeholder: ({ toolName, toolCallId, action }) =>
+          action === "placeholder"
+            ? `[${toolName} ${toolCallId} omitted -- re-read with your original tool if needed]`
+            : `[truncated ${toolName} ${toolCallId}]\n`,
       }),
     ],
   });
@@ -109,8 +116,8 @@ async function main() {
   printPrompt("Prompt after ToolResultDecayStrategy", capturedPrompts[0]);
   console.log("\nWhat changed:");
   console.log("- the newest tool result stays full");
-  console.log("- the middle results are shortened");
-  console.log("- the oldest results become [result omitted]");
+  console.log("- the middle results are truncated with a header");
+  console.log("- the oldest results become re-read placeholders");
   console.log("- tool calls still remain, so the reasoning chain survives");
   console.log(`\nModel output: ${result.text}`);
 }

@@ -1,6 +1,24 @@
 import type { LanguageModelV3Prompt, LanguageModelV3ToolResultOutput } from "@ai-sdk/provider";
 import { ToolResultDecayStrategy } from "../index.js";
-import type { ContextManagementReminder, DecayedToolContext, RemovedToolExchange } from "../types.js";
+import type {
+  ContextManagementReminder,
+  DecayedToolContext,
+  RemovedToolExchange,
+  ToolResultDecayStrategyOptions,
+} from "../types.js";
+
+const DEPTH_ONLY_PRESSURE_ANCHORS = [
+  { toolTokens: 1, depthFactor: 1 },
+  { toolTokens: 5_000, depthFactor: 1 },
+  { toolTokens: 50_000, depthFactor: 1 },
+];
+
+function createDepthOnlyStrategy(options: ToolResultDecayStrategyOptions = {}) {
+  return new ToolResultDecayStrategy({
+    ...options,
+    pressureAnchors: DEPTH_ONLY_PRESSURE_ANCHORS,
+  });
+}
 
 function makeToolPrompt(toolCount: number, outputSize = 200): LanguageModelV3Prompt {
   const prompt: LanguageModelV3Prompt = [
@@ -176,7 +194,7 @@ function makeToolPromptWithOutputs(
 describe("ToolResultDecayStrategy", () => {
   test("does nothing when maxPromptTokens is not exceeded", async () => {
     const prompt = makeToolPrompt(10);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       maxPromptTokens: 10_000,
       estimator: {
         estimateMessage: () => 1,
@@ -199,7 +217,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-0", name: "tool_0", output: { type: "text" as const, value: largeOutput } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -217,7 +235,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -238,7 +256,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "tool_2", output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy(); // truncatedMaxTokens=200 → baseMaxChars=800
+    const strategy = createDepthOnlyStrategy(); // truncatedMaxTokens=200 → baseMaxChars=800
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -260,7 +278,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: "short text" },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -280,7 +298,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: i === 0 ? largeOutput : "ok" },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state, capturedRemoved } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -297,7 +315,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: largeOutput },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     // Pin call-0 (would normally be placeholdered at depth 11)
     const { state, capturedRemoved } = createMockState(prompt, ["call-0"]);
 
@@ -309,7 +327,7 @@ describe("ToolResultDecayStrategy", () => {
 
   test("non-tool messages are never modified", async () => {
     const prompt = makeToolPrompt(10);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     const originalSystem = (prompt[0] as any).content;
@@ -325,7 +343,7 @@ describe("ToolResultDecayStrategy", () => {
 
   test("preserves tool-call parts untouched", async () => {
     const prompt = makeToolPrompt(10);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -351,7 +369,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: largeOutput },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({ placeholder: "<removed>" });
+    const strategy = createDepthOnlyStrategy({ placeholder: "<removed>" });
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -369,7 +387,7 @@ describe("ToolResultDecayStrategy", () => {
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
     const captured: DecayedToolContext[] = [];
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       placeholder: (ctx) => {
         captured.push({ ...ctx });
         return `[${ctx.toolName}:${ctx.toolCallId} ${ctx.action}]`;
@@ -396,7 +414,7 @@ describe("ToolResultDecayStrategy", () => {
       { role: "user", content: [{ type: "text", text: "hello" }] },
       { role: "assistant", content: [{ type: "text", text: "hi" }] },
     ];
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state, capturedRemoved } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -413,7 +431,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: largeOutput },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -425,7 +443,7 @@ describe("ToolResultDecayStrategy", () => {
   });
 
   test("strategy has the correct name", () => {
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     expect(strategy.name).toBe("tool-result-decay");
   });
 
@@ -438,7 +456,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "tool_2", output: { type: "json" as const, value: largeJson } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 50, // baseMaxChars = 200
     });
     const { state } = createMockState(prompt);
@@ -472,7 +490,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "json" as const, value: smallJson },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -499,7 +517,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -531,7 +549,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool", output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -552,7 +570,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "tool_2", output: { type: "error-text" as const, value: largeError } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 25, // baseMaxChars = 100
     });
     const { state } = createMockState(prompt);
@@ -582,7 +600,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "tool_2", output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 50, // baseMaxChars = 200
     });
     const { state } = createMockState(prompt);
@@ -603,7 +621,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -628,7 +646,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-4", name: "latest", output: { type: "text" as const, value: "latest result" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 100, // baseMaxChars = 400
     });
     const { state } = createMockState(prompt);
@@ -665,47 +683,37 @@ describe("ToolResultDecayStrategy", () => {
   });
 
   test("warning reminder emitted for large at-risk results", async () => {
-    // 2 exchanges: call-0 at depth 1 with large result
-    // At depth 1 budget = 800, it's currently full (5000 > 800 → truncated, not full)
-    // Let's use truncatedMaxTokens=2000 so baseMaxChars=8000 to ensure call-0 is currently full
     const largeOutput = "x".repeat(5000);
     const outputs = [
       { id: "call-0", name: "read_file", output: { type: "text" as const, value: largeOutput } },
       { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 2000, // baseMaxChars = 8000
     });
     const { state, capturedReminders } = createMockState(prompt);
 
     await strategy.apply(state);
 
-    // call-0 at depth 1: budget = 8000/1 = 8000. 5000 < 8000 → full
-    // At depth 2: budget = 8000/2 = 4000. 5000 > 4000 → truncated. Significant compression.
-    // But 5000 chars is NOT > baseMaxChars (8000), so no warning issued.
-    // Let me adjust: we need estimatedChars > baseMaxChars for warning
-    expect(capturedReminders).toHaveLength(0);
+    expect(capturedReminders).toHaveLength(1);
+    expect(capturedReminders[0].content).toContain("call-0");
+    expect(capturedReminders[0].content).toContain("truncated");
   });
 
   test("warning reminder emitted for very large results exceeding baseMaxChars", async () => {
-    // Use a result larger than baseMaxChars that is currently full at depth 0
-    // and will be truncated at depth 1
     const hugeOutput = "x".repeat(10000);
     const outputs = [
       { id: "call-0", name: "read_file", output: { type: "text" as const, value: hugeOutput } },
     ];
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 200, // baseMaxChars = 800
     });
     const { state, capturedReminders } = createMockState(prompt);
 
     await strategy.apply(state);
 
-    // call-0 at depth 0: full (always)
-    // At depth 1: budget = 800. 10000 > 800 → truncated.
-    // estimatedChars (10000) > baseMaxChars (800) → at-risk
     expect(capturedReminders).toHaveLength(1);
     expect(capturedReminders[0].kind).toBe("tool-result-decay-warning");
     expect(capturedReminders[0].content).toContain("call-0");
@@ -720,7 +728,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: "small" },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state, capturedReminders } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -730,7 +738,7 @@ describe("ToolResultDecayStrategy", () => {
 
   test("maxPromptTokens gate still works (skip when under budget)", async () => {
     const prompt = makeToolPrompt(10);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       maxPromptTokens: 10_000,
       estimator: {
         estimateMessage: () => 1,
@@ -752,7 +760,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: largeOutput },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     const result = await strategy.apply(state);
@@ -778,7 +786,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: output },
     }));
     const prompt = makeToolPromptWithOutputs(outputs);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 100, // baseMaxChars = 400
     });
     const { state } = createMockState(prompt);
@@ -814,7 +822,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool_1", input: {}, output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       placeholder: (ctx) => {
         if (ctx.action === "truncate") {
           return `[truncated: ${ctx.toolName}]\n`;
@@ -839,7 +847,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "tool_1", input: {}, output: { type: "text" as const, value: "recent" } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy({ placeholder: "<removed>" });
+    const strategy = createDepthOnlyStrategy({ placeholder: "<removed>" });
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -860,7 +868,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "fs_read", input: { path: "/a" }, output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy({ decayInputs: true });
+    const strategy = createDepthOnlyStrategy({ decayInputs: true });
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -887,7 +895,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-1", name: "fs_read", input: { path: "/a" }, output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy({ decayInputs: false });
+    const strategy = createDepthOnlyStrategy({ decayInputs: false });
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -905,7 +913,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-2", name: "tool_2", input: { q: "recent" }, output: { type: "text" as const, value: "ok" } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -925,7 +933,7 @@ describe("ToolResultDecayStrategy", () => {
       { id: "call-0", name: "read_file", input: { description: "Read the config" }, output: { type: "text" as const, value: hugeOutput } },
     ];
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy({
+    const strategy = createDepthOnlyStrategy({
       truncatedMaxTokens: 200,
       placeholder: (ctx) => `[${ctx.toolName} id:${ctx.toolCallId}]`,
     });
@@ -950,7 +958,7 @@ describe("ToolResultDecayStrategy", () => {
       })),
     ];
     const prompt = makeToolPromptWithBatchCalls(batches);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state, capturedRemoved } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -978,7 +986,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: "ok" },
     }));
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     const result = await strategy.apply(state);
@@ -999,7 +1007,7 @@ describe("ToolResultDecayStrategy", () => {
       output: { type: "text" as const, value: "ok" },
     }));
     const prompt = makeToolPromptWithInputs(entries);
-    const strategy = new ToolResultDecayStrategy();
+    const strategy = createDepthOnlyStrategy();
     const { state } = createMockState(prompt);
 
     await strategy.apply(state);
@@ -1007,5 +1015,105 @@ describe("ToolResultDecayStrategy", () => {
     // call-0 at depth 11: 800/11 = 72 < placeholderFloor (80) → placeholder
     const input0 = getToolCallInput(state.prompt, "call-0") as Record<string, unknown>;
     expect(input0._omitted).toBe(true);
+  });
+
+  test("default pressure anchors keep low-token tool results intact at deep depths", async () => {
+    const outputs = Array.from({ length: 11 }, (_, i) => ({
+      id: `call-${i}`,
+      name: `tool_${i}`,
+      output: { type: "text" as const, value: "x".repeat(80) },
+    }));
+    const prompt = makeToolPromptWithOutputs(outputs);
+    const strategy = new ToolResultDecayStrategy();
+    const { state, capturedRemoved } = createMockState(prompt);
+
+    await strategy.apply(state);
+
+    expect(getToolResultOutput(state.prompt, "call-0")).toBe("x".repeat(80));
+    expect(capturedRemoved).toHaveLength(0);
+  });
+
+  test("default pressure anchors reach near-placeholder budgets around 5k tool tokens by depth 10", async () => {
+    const largeOutput = "x".repeat(1_800);
+    const outputs = Array.from({ length: 11 }, (_, i) => ({
+      id: `call-${i}`,
+      name: `tool_${i}`,
+      output: { type: "text" as const, value: largeOutput },
+    }));
+    const prompt = makeToolPromptWithOutputs(outputs);
+    const strategy = new ToolResultDecayStrategy();
+    const { state } = createMockState(prompt);
+
+    await strategy.apply(state);
+
+    const output0 = getToolResultOutput(state.prompt, "call-0");
+    expect(output0).toBeDefined();
+    expect(output0!.length).toBeLessThanOrEqual(80);
+    expect(output0!.length).toBeGreaterThan(0);
+  });
+
+  test("default pressure anchors placeholder around 5k-plus tool tokens by depth 11", async () => {
+    const largeOutput = "x".repeat(1_800);
+    const outputs = Array.from({ length: 12 }, (_, i) => ({
+      id: `call-${i}`,
+      name: `tool_${i}`,
+      output: { type: "text" as const, value: largeOutput },
+    }));
+    const prompt = makeToolPromptWithOutputs(outputs);
+    const strategy = new ToolResultDecayStrategy();
+    const { state, capturedRemoved } = createMockState(prompt);
+
+    await strategy.apply(state);
+
+    expect(getToolResultOutput(state.prompt, "call-0")).toBe("[result omitted]");
+    expect(capturedRemoved.some((entry) => entry.toolCallId === "call-0")).toBe(true);
+  });
+
+  test("default pressure anchors truncate depth-1 results when tool context is above 50k tokens", async () => {
+    const hugeOutput = "x".repeat(120_000);
+    const outputs = [
+      { id: "call-0", name: "tool_0", output: { type: "text" as const, value: hugeOutput } },
+      { id: "call-1", name: "tool_1", output: { type: "text" as const, value: hugeOutput } },
+    ];
+    const prompt = makeToolPromptWithOutputs(outputs);
+    const strategy = new ToolResultDecayStrategy();
+    const { state } = createMockState(prompt);
+
+    await strategy.apply(state);
+
+    const output0 = getToolResultOutput(state.prompt, "call-0");
+    expect(output0).toBeDefined();
+    expect(output0!.length).toBeLessThanOrEqual(160);
+    expect(getToolResultOutput(state.prompt, "call-1")).toBe(hugeOutput);
+  });
+
+  test("default forecast warning includes the full affected tool set and reminder attributes", async () => {
+    const mediumOutput = "x".repeat(300);
+    const outputs = Array.from({ length: 5 }, (_, i) => ({
+      id: `call-${i}`,
+      name: `tool_${i}`,
+      output: { type: "text" as const, value: mediumOutput },
+    }));
+    const prompt = makeToolPromptWithOutputs(outputs);
+    const strategy = new ToolResultDecayStrategy();
+    const { state, capturedReminders } = createMockState(prompt);
+
+    const result = await strategy.apply(state);
+
+    expect(capturedReminders).toHaveLength(1);
+    expect(capturedReminders[0].kind).toBe("tool-result-decay-warning");
+    expect(capturedReminders[0].content).toContain("10,000");
+    expect(capturedReminders[0].attributes?.tool_call_ids).toBe("call-0,call-1,call-2,call-3");
+    expect(capturedReminders[0].attributes?.placeholder_ids).toBe("call-0");
+    expect(capturedReminders[0].attributes?.truncate_ids).toBe("call-1,call-2,call-3");
+    expect(result.payloads).toHaveProperty("warningToolCallIds");
+    expect(result.payloads).toHaveProperty("warningPlaceholderIds");
+    expect(result.payloads).toHaveProperty("warningTruncateIds");
+    expect((result.payloads as Record<string, unknown>).warningToolCallIds).toEqual([
+      "call-0",
+      "call-1",
+      "call-2",
+      "call-3",
+    ]);
   });
 });

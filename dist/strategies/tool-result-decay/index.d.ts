@@ -9,6 +9,8 @@ export declare class ToolResultDecayStrategy implements ContextManagementStrateg
     private readonly placeholder;
     private readonly decayInputs;
     private readonly estimator;
+    private readonly pressureAnchors;
+    private readonly warningForecastExtraTokens;
     constructor(options?: ToolResultDecayStrategyOptions);
     apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution>;
     private emitDecayWarning;

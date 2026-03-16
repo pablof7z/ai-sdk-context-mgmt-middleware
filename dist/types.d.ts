@@ -148,6 +148,10 @@ export interface DecayedToolContext {
     output: LanguageModelV3ToolResultOutput;
     action: "truncate" | "placeholder";
 }
+export interface ToolResultDecayPressureAnchor {
+    toolTokens: number;
+    depthFactor: number;
+}
 export interface ToolResultDecayStrategyOptions {
     truncatedMaxTokens?: number;
     placeholderFloorTokens?: number;
@@ -155,6 +159,8 @@ export interface ToolResultDecayStrategyOptions {
     placeholder?: string | ((context: DecayedToolContext) => string);
     decayInputs?: boolean;
     estimator?: PromptTokenEstimator;
+    pressureAnchors?: ToolResultDecayPressureAnchor[];
+    warningForecastExtraTokens?: number;
 }
 export interface SystemPromptCachingStrategyOptions {
     consolidateSystemMessages?: boolean;

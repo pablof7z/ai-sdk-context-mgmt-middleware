@@ -7,13 +7,20 @@ import type {
   ContextManagementStrategyState,
   DecayedToolContext,
   RemovedToolExchange,
+  ToolResultDecayPressureAnchor,
   ToolResultDecayStrategyOptions,
 } from "../../types.js";
 
 const DEFAULT_TRUNCATED_MAX_TOKENS = 200;
 const DEFAULT_PLACEHOLDER_FLOOR_TOKENS = 20;
 const DEFAULT_PLACEHOLDER = "[result omitted]";
+const DEFAULT_WARNING_FORECAST_EXTRA_TOKENS = 10_000;
 const CHARS_PER_TOKEN = 4;
+const DEFAULT_PRESSURE_ANCHORS: readonly ToolResultDecayPressureAnchor[] = [
+  { toolTokens: 100, depthFactor: 0.05 },
+  { toolTokens: 5_000, depthFactor: 1 },
+  { toolTokens: 50_000, depthFactor: 5 },
+];
 
 type DecayAction =
   | { type: "full" }
@@ -144,17 +151,129 @@ function serializeOutputToText(output: LanguageModelV3ToolResultOutput): string 
   }
 }
 
+function normalizePressureAnchors(
+  anchors?: ToolResultDecayPressureAnchor[]
+): ToolResultDecayPressureAnchor[] {
+  const source = anchors?.length ? anchors : DEFAULT_PRESSURE_ANCHORS;
+  const byToolTokens = new Map<number, number>();
+
+  for (const anchor of source) {
+    const toolTokens = Number.isFinite(anchor.toolTokens) ? Math.max(1, Math.floor(anchor.toolTokens)) : 1;
+    const depthFactor = Number.isFinite(anchor.depthFactor) ? Math.max(0.0001, anchor.depthFactor) : 0.0001;
+    byToolTokens.set(toolTokens, depthFactor);
+  }
+
+  if (byToolTokens.size === 0) {
+    return DEFAULT_PRESSURE_ANCHORS.map((anchor) => ({ ...anchor }));
+  }
+
+  return [...byToolTokens.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([toolTokens, depthFactor]) => ({ toolTokens, depthFactor }));
+}
+
+function interpolateDepthFactor(
+  anchors: readonly ToolResultDecayPressureAnchor[],
+  toolTokens: number
+): number {
+  if (anchors.length === 0) {
+    return 1;
+  }
+
+  const normalizedTokens = Math.max(0, toolTokens);
+  const first = anchors[0];
+  const last = anchors[anchors.length - 1];
+
+  if (anchors.length === 1 || normalizedTokens <= first.toolTokens) {
+    return first.depthFactor;
+  }
+
+  if (normalizedTokens >= last.toolTokens) {
+    return last.depthFactor;
+  }
+
+  const logTokens = Math.log(Math.max(1, normalizedTokens));
+
+  for (let i = 1; i < anchors.length; i++) {
+    const next = anchors[i];
+    if (normalizedTokens > next.toolTokens) {
+      continue;
+    }
+
+    const previous = anchors[i - 1];
+    const start = Math.log(previous.toolTokens);
+    const end = Math.log(next.toolTokens);
+    const progress = end === start ? 1 : (logTokens - start) / (end - start);
+    return previous.depthFactor + progress * (next.depthFactor - previous.depthFactor);
+  }
+
+  return last.depthFactor;
+}
+
+function estimateToolContextTokens(
+  outputCharEstimates: ReadonlyMap<string, number>,
+  inputCharEstimates: ReadonlyMap<string, number>
+): number {
+  let totalChars = 0;
+
+  for (const value of outputCharEstimates.values()) {
+    totalChars += value;
+  }
+
+  for (const value of inputCharEstimates.values()) {
+    totalChars += value;
+  }
+
+  return Math.ceil(totalChars / CHARS_PER_TOKEN);
+}
+
+function actionSeverity(action: DecayAction): number {
+  switch (action.type) {
+    case "full":
+      return 0;
+    case "truncate":
+      return 1;
+    case "placeholder":
+      return 2;
+  }
+}
+
+function isForecastWorse(current: DecayAction, forecast: DecayAction): boolean {
+  const currentSeverity = actionSeverity(current);
+  const forecastSeverity = actionSeverity(forecast);
+
+  if (forecastSeverity > currentSeverity) {
+    return true;
+  }
+
+  if (forecastSeverity < currentSeverity) {
+    return false;
+  }
+
+  if (current.type === "truncate" && forecast.type === "truncate") {
+    return forecast.maxChars < current.maxChars;
+  }
+
+  return false;
+}
+
 function classifyExchange(
   depth: number,
   estimatedChars: number,
   baseMaxChars: number,
-  placeholderFloorChars: number
+  placeholderFloorChars: number,
+  depthFactor: number
 ): DecayAction {
   if (depth === 0) {
     return { type: "full" };
   }
 
-  const maxChars = Math.floor(baseMaxChars / depth);
+  const effectiveDepth = depth * depthFactor;
+  if (effectiveDepth < 1) {
+    return { type: "full" };
+  }
+
+  const maxChars = Math.max(1, Math.floor(baseMaxChars / effectiveDepth));
 
   if (maxChars < placeholderFloorChars) {
     return { type: "placeholder" };
@@ -173,7 +292,8 @@ interface AtRiskExchange {
   input: unknown;
   output: LanguageModelV3ToolResultOutput;
   estimatedChars: number;
-  nextAction: DecayAction;
+  currentAction: DecayAction;
+  forecastAction: DecayAction;
 }
 
 export class ToolResultDecayStrategy implements ContextManagementStrategy {
@@ -184,6 +304,8 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
   private readonly placeholder: string | ((context: DecayedToolContext) => string);
   private readonly decayInputs: boolean;
   private readonly estimator;
+  private readonly pressureAnchors: ToolResultDecayPressureAnchor[];
+  private readonly warningForecastExtraTokens: number;
 
   constructor(options: ToolResultDecayStrategyOptions = {}) {
     this.truncatedMaxTokens = Math.max(0, Math.floor(options.truncatedMaxTokens ?? DEFAULT_TRUNCATED_MAX_TOKENS));
@@ -192,11 +314,17 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
     this.placeholder = options.placeholder ?? DEFAULT_PLACEHOLDER;
     this.decayInputs = options.decayInputs ?? true;
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
+    this.pressureAnchors = normalizePressureAnchors(options.pressureAnchors);
+    this.warningForecastExtraTokens = Math.max(
+      0,
+      Math.floor(options.warningForecastExtraTokens ?? DEFAULT_WARNING_FORECAST_EXTRA_TOKENS)
+    );
   }
 
   async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
     const currentPromptTokens = this.estimator.estimatePrompt(state.prompt)
       + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
+
     if (
       this.maxPromptTokens !== undefined &&
       currentPromptTokens <= this.maxPromptTokens
@@ -208,6 +336,8 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
           currentPromptTokens,
           truncatedMaxTokens: this.truncatedMaxTokens,
           placeholderFloorTokens: this.placeholderFloorTokens,
+          pressureAnchors: this.pressureAnchors.map((anchor) => ({ ...anchor })),
+          warningForecastExtraTokens: this.warningForecastExtraTokens,
         },
       };
     }
@@ -222,14 +352,12 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
           currentPromptTokens,
           truncatedMaxTokens: this.truncatedMaxTokens,
           placeholderFloorTokens: this.placeholderFloorTokens,
+          pressureAnchors: this.pressureAnchors.map((anchor) => ({ ...anchor })),
+          warningForecastExtraTokens: this.warningForecastExtraTokens,
         },
       };
     }
 
-    // Group exchanges by their call message index so that all tool calls issued
-    // in the same assistant turn (same batch) share the same depth.  This
-    // prevents a large parallel batch from being immediately decayed because
-    // individual calls within the batch get different positional depths.
     const turnGroups = new Map<number, ToolExchange[]>();
     for (const exchange of exchanges.values()) {
       const turnKey = exchange.callMessageIndex ?? -1;
@@ -238,11 +366,8 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       turnGroups.set(turnKey, group);
     }
 
-    // Sort groups oldest-first by call message index.
     const sortedGroups = [...turnGroups.entries()].sort(([a], [b]) => a - b);
 
-    // Assign depth per group: depth 0 = most recent group.
-    // Every call within the same batch gets the same depth.
     const depthMap = new Map<string, number>();
     const numGroups = sortedGroups.length;
     for (let groupIdx = 0; groupIdx < numGroups; groupIdx++) {
@@ -252,13 +377,11 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       }
     }
 
-    // Flatten groups into a single list for the loops below.
     const sorted = sortedGroups.flatMap(([, group]) => group);
 
     const baseMaxChars = this.truncatedMaxTokens * CHARS_PER_TOKEN;
     const placeholderFloorChars = this.placeholderFloorTokens * CHARS_PER_TOKEN;
 
-    // Build per-exchange estimated char counts and snapshot original outputs/inputs
     const charEstimates = new Map<string, number>();
     const originalOutputs = new Map<string, LanguageModelV3ToolResultOutput>();
     const inputs = new Map<string, unknown>();
@@ -268,11 +391,13 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       if (message.role !== "tool" && message.role !== "assistant") {
         continue;
       }
+
       for (const part of message.content) {
         if (part.type === "tool-result" && !charEstimates.has(part.toolCallId)) {
           charEstimates.set(part.toolCallId, estimateOutputChars(part.output));
           originalOutputs.set(part.toolCallId, part.output);
         }
+
         if (part.type === "tool-call" && !inputs.has(part.toolCallId)) {
           inputs.set(part.toolCallId, part.input);
           inputCharEstimates.set(part.toolCallId, safeStringify(part.input).length);
@@ -280,7 +405,11 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       }
     }
 
-    // Classify each exchange (outputs)
+    const toolContextTokens = estimateToolContextTokens(charEstimates, inputCharEstimates);
+    const depthFactor = interpolateDepthFactor(this.pressureAnchors, toolContextTokens);
+    const forecastToolContextTokens = toolContextTokens + this.warningForecastExtraTokens;
+    const forecastDepthFactor = interpolateDepthFactor(this.pressureAnchors, forecastToolContextTokens);
+
     const actions = new Map<string, DecayAction>();
     for (const exchange of sorted) {
       if (state.pinnedToolCallIds.has(exchange.toolCallId)) {
@@ -290,10 +419,12 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
       const depth = depthMap.get(exchange.toolCallId)!;
       const estimatedChars = charEstimates.get(exchange.toolCallId) ?? 0;
-      actions.set(exchange.toolCallId, classifyExchange(depth, estimatedChars, baseMaxChars, placeholderFloorChars));
+      actions.set(
+        exchange.toolCallId,
+        classifyExchange(depth, estimatedChars, baseMaxChars, placeholderFloorChars, depthFactor)
+      );
     }
 
-    // Classify inputs independently
     const inputActions = new Map<string, DecayAction>();
     if (this.decayInputs) {
       for (const exchange of sorted) {
@@ -304,49 +435,45 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
         const depth = depthMap.get(exchange.toolCallId)!;
         const estimatedChars = inputCharEstimates.get(exchange.toolCallId) ?? 0;
-        inputActions.set(exchange.toolCallId, classifyExchange(depth, estimatedChars, baseMaxChars, placeholderFloorChars));
+        inputActions.set(
+          exchange.toolCallId,
+          classifyExchange(depth, estimatedChars, baseMaxChars, placeholderFloorChars, depthFactor)
+        );
       }
     }
 
-    // Find at-risk exchanges: currently full/lightly-truncated but will be significantly compressed next turn
     const atRiskExchanges: AtRiskExchange[] = [];
     for (const exchange of sorted) {
       if (state.pinnedToolCallIds.has(exchange.toolCallId)) {
         continue;
       }
+
       const depth = depthMap.get(exchange.toolCallId)!;
       const estimatedChars = charEstimates.get(exchange.toolCallId) ?? 0;
       const currentAction = actions.get(exchange.toolCallId)!;
-      const nextAction = classifyExchange(depth + 1, estimatedChars, baseMaxChars, placeholderFloorChars);
+      const forecastAction = classifyExchange(
+        depth + 1,
+        estimatedChars,
+        baseMaxChars,
+        placeholderFloorChars,
+        forecastDepthFactor
+      );
 
-      // Only warn about big results that will be newly compressed
-      if (estimatedChars <= baseMaxChars) {
+      if (!isForecastWorse(currentAction, forecastAction)) {
         continue;
       }
 
-      const isCurrentlyFull = currentAction.type === "full";
-      const isCurrentlyLightlyTruncated = currentAction.type === "truncate" && currentAction.maxChars >= estimatedChars * 0.5;
-      if (!isCurrentlyFull && !isCurrentlyLightlyTruncated) {
-        continue;
-      }
-
-      const willBeNewlyCompressed =
-        (nextAction.type === "truncate" && (isCurrentlyFull || (currentAction.type === "truncate" && nextAction.maxChars < currentAction.maxChars * 0.5))) ||
-        nextAction.type === "placeholder";
-
-      if (willBeNewlyCompressed) {
-        atRiskExchanges.push({
-          toolCallId: exchange.toolCallId,
-          toolName: exchange.toolName,
-          input: inputs.get(exchange.toolCallId),
-          output: originalOutputs.get(exchange.toolCallId) ?? { type: "text", value: "" },
-          estimatedChars,
-          nextAction,
-        });
-      }
+      atRiskExchanges.push({
+        toolCallId: exchange.toolCallId,
+        toolName: exchange.toolName,
+        input: inputs.get(exchange.toolCallId),
+        output: originalOutputs.get(exchange.toolCallId) ?? { type: "text", value: "" },
+        estimatedChars,
+        currentAction,
+        forecastAction,
+      });
     }
 
-    // Count truncated and placeholder exchanges (outputs)
     let truncatedCount = 0;
     let placeholderCount = 0;
     for (const action of actions.values()) {
@@ -354,7 +481,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       if (action.type === "placeholder") placeholderCount++;
     }
 
-    // Count truncated and placeholder inputs
     let inputTruncatedCount = 0;
     let inputPlaceholderCount = 0;
     if (this.decayInputs) {
@@ -364,13 +490,23 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       }
     }
 
-    const hasMutations = truncatedCount > 0 || placeholderCount > 0
-      || inputTruncatedCount > 0 || inputPlaceholderCount > 0;
+    const warningToolCallIds = atRiskExchanges.map((entry) => entry.toolCallId);
+    const warningTruncateIds = atRiskExchanges
+      .filter((entry) => entry.forecastAction.type === "truncate")
+      .map((entry) => entry.toolCallId);
+    const warningPlaceholderIds = atRiskExchanges
+      .filter((entry) => entry.forecastAction.type === "placeholder")
+      .map((entry) => entry.toolCallId);
+
+    const hasMutations =
+      truncatedCount > 0 ||
+      placeholderCount > 0 ||
+      inputTruncatedCount > 0 ||
+      inputPlaceholderCount > 0;
 
     if (!hasMutations) {
-      // Emit warning even if nothing to mutate this turn
       if (atRiskExchanges.length > 0) {
-        await this.emitDecayWarning(state, atRiskExchanges);
+        await this.emitDecayWarning(state, atRiskExchanges, forecastToolContextTokens);
       }
 
       return {
@@ -378,6 +514,10 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
         workingTokenBudget: this.maxPromptTokens,
         payloads: {
           currentPromptTokens,
+          toolContextTokens,
+          depthFactor,
+          forecastToolContextTokens,
+          forecastDepthFactor,
           truncatedMaxTokens: this.truncatedMaxTokens,
           placeholderFloorTokens: this.placeholderFloorTokens,
           truncatedCount: 0,
@@ -386,13 +526,17 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
           inputPlaceholderCount: 0,
           totalToolExchanges: exchanges.size,
           warningCount: atRiskExchanges.length,
+          warningForecastExtraTokens: this.warningForecastExtraTokens,
+          warningToolCallIds,
+          warningTruncateIds,
+          warningPlaceholderIds,
+          pressureAnchors: this.pressureAnchors.map((anchor) => ({ ...anchor })),
         },
       };
     }
 
-    // Emit warning before mutation
     if (atRiskExchanges.length > 0) {
-      await this.emitDecayWarning(state, atRiskExchanges);
+      await this.emitDecayWarning(state, atRiskExchanges, forecastToolContextTokens);
     }
 
     const prompt = clonePrompt(state.prompt);
@@ -404,7 +548,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       }
 
       for (const part of message.content) {
-        // Decay tool-result outputs
         if (part.type === "tool-result") {
           const action = actions.get(part.toolCallId);
           if (!action || action.type === "full") {
@@ -429,15 +572,16 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
               part.output = truncateToolResultOutput(part.output, action.maxChars);
             }
           } else if (action.type === "placeholder") {
-            const placeholderText = typeof this.placeholder === "function"
-              ? this.placeholder({
-                  toolName: part.toolName,
-                  toolCallId: part.toolCallId,
-                  input: inputs.get(part.toolCallId),
-                  output: originalOutputs.get(part.toolCallId)!,
-                  action: "placeholder",
-                })
-              : this.placeholder;
+            const placeholderText =
+              typeof this.placeholder === "function"
+                ? this.placeholder({
+                    toolName: part.toolName,
+                    toolCallId: part.toolCallId,
+                    input: inputs.get(part.toolCallId),
+                    output: originalOutputs.get(part.toolCallId)!,
+                    action: "placeholder",
+                  })
+                : this.placeholder;
 
             part.output = { type: "text", value: placeholderText };
 
@@ -449,7 +593,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
           }
         }
 
-        // Decay tool-call inputs
         if (part.type === "tool-call" && this.decayInputs) {
           const action = inputActions.get(part.toolCallId);
           if (!action || action.type === "full") {
@@ -474,6 +617,10 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       workingTokenBudget: this.maxPromptTokens,
       payloads: {
         currentPromptTokens,
+        toolContextTokens,
+        depthFactor,
+        forecastToolContextTokens,
+        forecastDepthFactor,
         truncatedMaxTokens: this.truncatedMaxTokens,
         placeholderFloorTokens: this.placeholderFloorTokens,
         truncatedCount,
@@ -482,39 +629,71 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
         inputPlaceholderCount,
         totalToolExchanges: exchanges.size,
         warningCount: atRiskExchanges.length,
+        warningForecastExtraTokens: this.warningForecastExtraTokens,
+        warningToolCallIds,
+        warningTruncateIds,
+        warningPlaceholderIds,
+        pressureAnchors: this.pressureAnchors.map((anchor) => ({ ...anchor })),
       },
     };
   }
 
-  private async emitDecayWarning(state: ContextManagementStrategyState, atRisk: AtRiskExchange[]): Promise<void> {
+  private async emitDecayWarning(
+    state: ContextManagementStrategyState,
+    atRisk: AtRiskExchange[],
+    forecastToolContextTokens: number
+  ): Promise<void> {
     const lines = [
-      "Context decay notice: The following tool results will be compressed next turn.",
-      "Save any important information to your scratchpad now.",
+      `Context decay notice: If the next step adds about ${this.warningForecastExtraTokens.toLocaleString("en-US")} tool-context tokens (to roughly ${forecastToolContextTokens.toLocaleString("en-US")} total tool-context tokens), the following tool results will be compressed.`,
+      "Save or restate anything important now.",
     ];
 
     for (const entry of atRisk) {
       const estimatedTokens = Math.ceil(entry.estimatedChars / CHARS_PER_TOKEN);
 
       if (typeof this.placeholder === "function") {
-        const formattedAction = entry.nextAction.type === "placeholder" ? "placeholder" : "truncate";
+        const formattedAction = entry.forecastAction.type === "placeholder" ? "placeholder" : "truncate";
         const formatted = this.placeholder({
           toolName: entry.toolName,
           toolCallId: entry.toolCallId,
           input: entry.input,
           output: entry.output,
-          action: formattedAction as "truncate" | "placeholder",
+          action: formattedAction,
         });
         lines.push(`- ${formatted} (~${estimatedTokens.toLocaleString("en-US")} tokens)`);
-      } else if (entry.nextAction.type === "placeholder") {
-        lines.push(`- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens → replaced with placeholder`);
-      } else if (entry.nextAction.type === "truncate") {
-        lines.push(`- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens → truncated to ~${entry.nextAction.maxChars.toLocaleString("en-US")} chars`);
+        continue;
+      }
+
+      if (entry.forecastAction.type === "placeholder") {
+        lines.push(
+          `- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens -> placeholder`
+        );
+        continue;
+      }
+
+      if (entry.forecastAction.type === "truncate") {
+        lines.push(
+          `- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens -> truncated to ~${entry.forecastAction.maxChars.toLocaleString("en-US")} chars`
+        );
       }
     }
 
     await state.emitReminder({
       kind: "tool-result-decay-warning",
       content: lines.join("\n"),
+      attributes: {
+        tool_call_ids: atRisk.map((entry) => entry.toolCallId).join(","),
+        truncate_ids: atRisk
+          .filter((entry) => entry.forecastAction.type === "truncate")
+          .map((entry) => entry.toolCallId)
+          .join(","),
+        placeholder_ids: atRisk
+          .filter((entry) => entry.forecastAction.type === "placeholder")
+          .map((entry) => entry.toolCallId)
+          .join(","),
+        forecast_extra_tool_tokens: String(this.warningForecastExtraTokens),
+        forecast_tool_context_tokens: String(forecastToolContextTokens),
+      },
     });
   }
 }

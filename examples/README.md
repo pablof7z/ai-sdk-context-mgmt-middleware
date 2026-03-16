@@ -26,8 +26,8 @@ npx tsx 01-sliding-window.ts
 
 ### `02-tool-result-decay.ts`
 
-- shows full, truncated, and placeholder zones for tool results
-- look for old tool outputs becoming `[result omitted]`
+- shows pressure-aware full, truncated, and placeholder zones for tool results
+- look for custom truncation headers and re-read placeholders appearing as tool-context pressure rises
 
 ### `03-summarization.ts`
 
