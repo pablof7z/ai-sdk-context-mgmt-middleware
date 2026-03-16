@@ -3,7 +3,7 @@ import type { ContextManagementTelemetryEvent } from "../index.js";
 import { makePrompt } from "./helpers.js";
 
 describe("ContextWindowStatusStrategy", () => {
-  test("injects prompt status using working budget and raw model window", async () => {
+  test("injects request status using working budget and raw model window", async () => {
     const events: ContextManagementTelemetryEvent[] = [];
     const runtime = createContextManagementRuntime({
       strategies: [
@@ -12,6 +12,7 @@ describe("ContextWindowStatusStrategy", () => {
           estimator: {
             estimateMessage: () => 10,
             estimatePrompt: () => 120,
+            estimateTools: () => 30,
           },
           getContextWindow: ({ model }) =>
             model?.provider === "openrouter" && model.modelId === "anthropic/claude-4"
@@ -25,6 +26,7 @@ describe("ContextWindowStatusStrategy", () => {
       estimator: {
         estimateMessage: () => 10,
         estimatePrompt: () => 120,
+        estimateTools: () => 30,
       },
     });
 
@@ -52,22 +54,25 @@ describe("ContextWindowStatusStrategy", () => {
       },
     } as any);
 
-    expect(JSON.stringify(transformed?.prompt)).toContain("Current prompt after context management: ~120 tokens.");
-    expect(JSON.stringify(transformed?.prompt)).toContain("Working budget target: ~400 tokens (~30% used).");
+    expect(JSON.stringify(transformed?.prompt)).toContain("Current request after context management: ~150 tokens.");
+    expect(JSON.stringify(transformed?.prompt)).toContain("Breakdown: ~120 message tokens + ~30 tool-definition tokens.");
+    expect(JSON.stringify(transformed?.prompt)).toContain("Working budget target: ~400 tokens (~38% used).");
     expect(JSON.stringify(transformed?.prompt)).toContain("Raw model context window: ~200,000 tokens (~0% used).");
 
     const strategyEvent = events.find((event) => event.type === "strategy-complete");
     expect(strategyEvent).toBeDefined();
     if (strategyEvent?.type === "strategy-complete") {
       expect(strategyEvent.reason).toBe("context-window-status-injected");
-      expect(strategyEvent.payloads.strategy).toEqual(
-        expect.objectContaining({
-          estimatedPromptTokens: 120,
-          rawContextWindow: 200_000,
-          workingTokenBudget: 400,
-          reminderText: expect.stringContaining("Current prompt after context management"),
-        })
-      );
+        expect(strategyEvent.payloads.strategy).toEqual(
+          expect.objectContaining({
+            estimatedPromptTokens: 150,
+            estimatedMessageTokens: 120,
+            estimatedToolTokens: 30,
+            rawContextWindow: 200_000,
+            workingTokenBudget: 400,
+            reminderText: expect.stringContaining("Current request after context management"),
+          })
+        );
     }
   });
 
@@ -76,6 +81,7 @@ describe("ContextWindowStatusStrategy", () => {
       estimator: {
         estimateMessage: () => 10,
         estimatePrompt: () => 120,
+        estimateTools: () => 30,
       },
     });
     const prompt = makePrompt();
@@ -102,7 +108,9 @@ describe("ContextWindowStatusStrategy", () => {
       outcome: "skipped",
       reason: "no-context-capacity-data",
       payloads: {
-        estimatedPromptTokens: 120,
+        estimatedPromptTokens: 150,
+        estimatedMessageTokens: 120,
+        estimatedToolTokens: 30,
       },
     });
   });

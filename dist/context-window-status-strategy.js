@@ -9,16 +9,21 @@ function formatPercent(numerator, denominator) {
     return Math.round((numerator / denominator) * 100);
 }
 function buildReminder(options) {
-    const { estimatedPromptTokens, rawContextWindow, workingTokenBudget } = options;
+    const { estimatedRequestTokens, estimatedMessageTokens, estimatedToolTokens, rawContextWindow, workingTokenBudget, } = options;
     const lines = [
         "[Context status]",
-        `Current prompt after context management: ~${formatNumber(estimatedPromptTokens)} tokens.`,
+        `Current request after context management: ~${formatNumber(estimatedRequestTokens)} tokens.`,
     ];
+    if (estimatedMessageTokens !== undefined
+        && estimatedToolTokens !== undefined
+        && estimatedToolTokens > 0) {
+        lines.push(`Breakdown: ~${formatNumber(estimatedMessageTokens)} message tokens + ~${formatNumber(estimatedToolTokens)} tool-definition tokens.`);
+    }
     if (workingTokenBudget !== undefined) {
-        lines.push(`Working budget target: ~${formatNumber(workingTokenBudget)} tokens (~${formatPercent(estimatedPromptTokens, workingTokenBudget)}% used).`);
+        lines.push(`Working budget target: ~${formatNumber(workingTokenBudget)} tokens (~${formatPercent(estimatedRequestTokens, workingTokenBudget)}% used).`);
     }
     if (rawContextWindow !== undefined) {
-        lines.push(`Raw model context window: ~${formatNumber(rawContextWindow)} tokens (~${formatPercent(estimatedPromptTokens, rawContextWindow)}% used).`);
+        lines.push(`Raw model context window: ~${formatNumber(rawContextWindow)} tokens (~${formatPercent(estimatedRequestTokens, rawContextWindow)}% used).`);
     }
     lines.push("[/Context status]");
     return lines.join("\n");
@@ -38,7 +43,9 @@ export class ContextWindowStatusStrategy {
         this.getContextWindow = options.getContextWindow;
     }
     async apply(state) {
-        const estimatedPromptTokens = this.estimator.estimatePrompt(state.prompt);
+        const estimatedMessageTokens = this.estimator.estimatePrompt(state.prompt);
+        const estimatedToolTokens = this.estimator.estimateTools?.(state.params?.tools) ?? 0;
+        const estimatedRequestTokens = estimatedMessageTokens + estimatedToolTokens;
         const rawContextWindow = this.getContextWindow?.({
             model: state.model,
             requestContext: state.requestContext,
@@ -48,12 +55,16 @@ export class ContextWindowStatusStrategy {
                 outcome: "skipped",
                 reason: "no-context-capacity-data",
                 payloads: {
-                    estimatedPromptTokens,
+                    estimatedPromptTokens: estimatedRequestTokens,
+                    estimatedMessageTokens,
+                    estimatedToolTokens,
                 },
             };
         }
         const reminderText = buildReminder({
-            estimatedPromptTokens,
+            estimatedRequestTokens,
+            estimatedMessageTokens,
+            estimatedToolTokens,
             rawContextWindow,
             workingTokenBudget: this.workingTokenBudget,
         });
@@ -67,14 +78,16 @@ export class ContextWindowStatusStrategy {
                 ? { workingTokenBudget: this.workingTokenBudget }
                 : {}),
             payloads: {
-                estimatedPromptTokens,
+                estimatedPromptTokens: estimatedRequestTokens,
+                estimatedMessageTokens,
+                estimatedToolTokens,
                 rawContextWindow,
                 rawContextUtilizationPercent: rawContextWindow !== undefined
-                    ? formatPercent(estimatedPromptTokens, rawContextWindow)
+                    ? formatPercent(estimatedRequestTokens, rawContextWindow)
                     : undefined,
                 workingTokenBudget: this.workingTokenBudget,
                 workingBudgetUtilizationPercent: this.workingTokenBudget !== undefined
-                    ? formatPercent(estimatedPromptTokens, this.workingTokenBudget)
+                    ? formatPercent(estimatedRequestTokens, this.workingTokenBudget)
                     : undefined,
                 reminderText,
             },

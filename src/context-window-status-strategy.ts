@@ -20,25 +20,43 @@ function formatPercent(numerator: number, denominator: number): number {
 }
 
 function buildReminder(options: {
-  estimatedPromptTokens: number;
+  estimatedRequestTokens: number;
+  estimatedMessageTokens?: number;
+  estimatedToolTokens?: number;
   rawContextWindow?: number;
   workingTokenBudget?: number;
 }): string {
-  const { estimatedPromptTokens, rawContextWindow, workingTokenBudget } = options;
+  const {
+    estimatedRequestTokens,
+    estimatedMessageTokens,
+    estimatedToolTokens,
+    rawContextWindow,
+    workingTokenBudget,
+  } = options;
   const lines = [
     "[Context status]",
-    `Current prompt after context management: ~${formatNumber(estimatedPromptTokens)} tokens.`,
+    `Current request after context management: ~${formatNumber(estimatedRequestTokens)} tokens.`,
   ];
+
+  if (
+    estimatedMessageTokens !== undefined
+    && estimatedToolTokens !== undefined
+    && estimatedToolTokens > 0
+  ) {
+    lines.push(
+      `Breakdown: ~${formatNumber(estimatedMessageTokens)} message tokens + ~${formatNumber(estimatedToolTokens)} tool-definition tokens.`
+    );
+  }
 
   if (workingTokenBudget !== undefined) {
     lines.push(
-      `Working budget target: ~${formatNumber(workingTokenBudget)} tokens (~${formatPercent(estimatedPromptTokens, workingTokenBudget)}% used).`
+      `Working budget target: ~${formatNumber(workingTokenBudget)} tokens (~${formatPercent(estimatedRequestTokens, workingTokenBudget)}% used).`
     );
   }
 
   if (rawContextWindow !== undefined) {
     lines.push(
-      `Raw model context window: ~${formatNumber(rawContextWindow)} tokens (~${formatPercent(estimatedPromptTokens, rawContextWindow)}% used).`
+      `Raw model context window: ~${formatNumber(rawContextWindow)} tokens (~${formatPercent(estimatedRequestTokens, rawContextWindow)}% used).`
     );
   }
 
@@ -63,7 +81,9 @@ export class ContextWindowStatusStrategy implements ContextManagementStrategy {
   }
 
   async apply(state: ContextManagementStrategyState): Promise<ContextManagementStrategyExecution> {
-    const estimatedPromptTokens = this.estimator.estimatePrompt(state.prompt);
+    const estimatedMessageTokens = this.estimator.estimatePrompt(state.prompt);
+    const estimatedToolTokens = this.estimator.estimateTools?.(state.params?.tools) ?? 0;
+    const estimatedRequestTokens = estimatedMessageTokens + estimatedToolTokens;
     const rawContextWindow = this.getContextWindow?.({
       model: state.model,
       requestContext: state.requestContext,
@@ -74,13 +94,17 @@ export class ContextWindowStatusStrategy implements ContextManagementStrategy {
         outcome: "skipped",
         reason: "no-context-capacity-data",
         payloads: {
-          estimatedPromptTokens,
+          estimatedPromptTokens: estimatedRequestTokens,
+          estimatedMessageTokens,
+          estimatedToolTokens,
         },
       };
     }
 
     const reminderText = buildReminder({
-      estimatedPromptTokens,
+      estimatedRequestTokens,
+      estimatedMessageTokens,
+      estimatedToolTokens,
       rawContextWindow,
       workingTokenBudget: this.workingTokenBudget,
     });
@@ -96,14 +120,16 @@ export class ContextWindowStatusStrategy implements ContextManagementStrategy {
         ? { workingTokenBudget: this.workingTokenBudget }
         : {}),
       payloads: {
-        estimatedPromptTokens,
+        estimatedPromptTokens: estimatedRequestTokens,
+        estimatedMessageTokens,
+        estimatedToolTokens,
         rawContextWindow,
         rawContextUtilizationPercent: rawContextWindow !== undefined
-          ? formatPercent(estimatedPromptTokens, rawContextWindow)
+          ? formatPercent(estimatedRequestTokens, rawContextWindow)
           : undefined,
         workingTokenBudget: this.workingTokenBudget,
         workingBudgetUtilizationPercent: this.workingTokenBudget !== undefined
-          ? formatPercent(estimatedPromptTokens, this.workingTokenBudget)
+          ? formatPercent(estimatedRequestTokens, this.workingTokenBudget)
           : undefined,
         reminderText,
       },
