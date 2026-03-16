@@ -39,7 +39,7 @@ async function main() {
       new SummarizationStrategy({
         summarize,
         maxPromptTokens: 80,
-        keepLastMessages: 2,
+        preserveRecentMessages: 2,
       }),
     ],
   });
@@ -71,7 +71,7 @@ async function main() {
   printPrompt("Prompt after SummarizationStrategy", capturedPrompts[0]);
   console.log("\nWhat changed:");
   console.log("- older turns were replaced by a tagged system summary");
-  console.log("- only the newest tail stays verbatim");
+  console.log("- the recent tail stayed verbatim while the older middle was summarized");
   console.log("- the agent can still refer to the old discussion, but through compressed facts");
   console.log(`\nModel output: ${result.text}`);
 }

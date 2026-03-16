@@ -5,7 +5,7 @@ import { generateText, wrapLanguageModel, type ModelMessage } from "ai";
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
 import {
   ContextUtilizationReminderStrategy,
-  LLMSummarizationStrategy,
+  SummarizationStrategy,
   ScratchpadStrategy,
   SystemPromptCachingStrategy,
   ToolResultDecayStrategy,
@@ -41,10 +41,10 @@ async function main() {
         placeholder: "[omitted]",
         estimator,
       }),
-      new LLMSummarizationStrategy({
+      new SummarizationStrategy({
         model: summarizerModel,
         maxPromptTokens: 160,
-        keepLastMessages: 4,
+        preserveRecentMessages: 4,
         estimator,
       }),
       new ScratchpadStrategy({

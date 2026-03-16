@@ -83,7 +83,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 2,
+      preserveRecentMessages: 2,
       estimator,
     });
 
@@ -101,7 +101,7 @@ describe("SummarizationStrategy", () => {
     const result = await strategy.apply(state);
 
     expect(calls).toHaveLength(1);
-    // 6 non-system messages total, keepLastMessages=2, so 4 messages summarized
+    // 6 non-system messages total, preserveRecentMessages=2, so 4 messages summarized
     expect(calls[0]).toHaveLength(4);
 
     // Result: system + summary + 2 tail messages
@@ -117,7 +117,7 @@ describe("SummarizationStrategy", () => {
       workingTokenBudget: 200,
       payloads: expect.objectContaining({
         estimatedTokens: 700,
-        keepLastMessages: 2,
+        preserveRecentMessages: 2,
         messagesSummarizedCount: 4,
         summaryCharCount: "summary of 4 messages".length,
       }),
@@ -129,7 +129,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 2,
+      preserveRecentMessages: 2,
       estimator,
     });
 
@@ -160,7 +160,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 1,
+      preserveRecentMessages: 1,
       estimator,
     });
 
@@ -206,7 +206,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 1,
+      preserveRecentMessages: 1,
       estimator,
     });
 
@@ -243,7 +243,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 1,
+      preserveRecentMessages: 1,
       estimator,
     });
 
@@ -289,7 +289,7 @@ describe("SummarizationStrategy", () => {
     const strategy = new SummarizationStrategy({
       summarize,
       maxPromptTokens: 200,
-      keepLastMessages: 1,
+      preserveRecentMessages: 1,
       estimator,
     });
 

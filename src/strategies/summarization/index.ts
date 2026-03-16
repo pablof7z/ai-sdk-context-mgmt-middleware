@@ -4,6 +4,7 @@ import {
   partitionPromptForSummarization,
 } from "../../prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "../../token-estimator.js";
+import { createLlmSummarizer } from "../llm-summarization/index.js";
 import type {
   ContextManagementStrategy,
   ContextManagementStrategyExecution,
@@ -14,7 +15,7 @@ import type {
 } from "../../types.js";
 import type { LanguageModelV3Message, LanguageModelV3Prompt } from "@ai-sdk/provider";
 
-const DEFAULT_KEEP_LAST_MESSAGES = 8;
+const DEFAULT_PRESERVE_RECENT_MESSAGES = 8;
 
 function isSummaryMessage(message: LanguageModelV3Message): boolean {
   if (!isContextManagementSystemMessage(message)) {
@@ -24,17 +25,36 @@ function isSummaryMessage(message: LanguageModelV3Message): boolean {
   return (message.providerOptions?.contextManagement as Record<string, unknown>).type === "summary";
 }
 
+function resolveSummarize(
+  options: SummarizationStrategyOptions
+): NonNullable<SummarizationStrategyOptions["summarize"]> {
+  if ("summarize" in options && typeof options.summarize === "function") {
+    return options.summarize;
+  }
+
+  if ("model" in options && options.model) {
+    return createLlmSummarizer({ model: options.model });
+  }
+
+  throw new Error("SummarizationStrategy requires either summarize or model");
+}
+
 export class SummarizationStrategy implements ContextManagementStrategy {
   readonly name = "summarization";
-  private readonly summarize: SummarizationStrategyOptions["summarize"];
+  private readonly summarize: NonNullable<SummarizationStrategyOptions["summarize"]>;
   private readonly maxPromptTokens: number;
-  private readonly keepLastMessages: number;
+  private readonly preserveRecentMessages: number;
   private readonly estimator: PromptTokenEstimator;
 
   constructor(options: SummarizationStrategyOptions) {
-    this.summarize = options.summarize;
+    this.summarize = resolveSummarize(options);
     this.maxPromptTokens = options.maxPromptTokens;
-    this.keepLastMessages = Math.max(0, Math.floor(options.keepLastMessages ?? DEFAULT_KEEP_LAST_MESSAGES));
+    this.preserveRecentMessages = Math.max(
+      0,
+      Math.floor(
+        options.preserveRecentMessages ?? DEFAULT_PRESERVE_RECENT_MESSAGES
+      )
+    );
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
   }
 
@@ -48,7 +68,7 @@ export class SummarizationStrategy implements ContextManagementStrategy {
         workingTokenBudget: this.maxPromptTokens,
         payloads: {
           estimatedTokens,
-          keepLastMessages: this.keepLastMessages,
+          preserveRecentMessages: this.preserveRecentMessages,
         },
       };
     }
@@ -60,7 +80,7 @@ export class SummarizationStrategy implements ContextManagementStrategy {
       preservedMessages,
     } = partitionPromptForSummarization(
       prompt,
-      this.keepLastMessages,
+      this.preserveRecentMessages,
       state.pinnedToolCallIds
     );
 
@@ -70,7 +90,7 @@ export class SummarizationStrategy implements ContextManagementStrategy {
         workingTokenBudget: this.maxPromptTokens,
         payloads: {
           estimatedTokens,
-          keepLastMessages: this.keepLastMessages,
+          preserveRecentMessages: this.preserveRecentMessages,
           preservedMessageCount: preservedMessages.length,
         },
       };
@@ -122,7 +142,7 @@ export class SummarizationStrategy implements ContextManagementStrategy {
       workingTokenBudget: this.maxPromptTokens,
       payloads: {
         estimatedTokens,
-        keepLastMessages: this.keepLastMessages,
+        preserveRecentMessages: this.preserveRecentMessages,
         messagesSummarizedCount: messagesToSummarize.length,
         summaryCharCount: summaryText.length,
       },

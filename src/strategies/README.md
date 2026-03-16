@@ -8,7 +8,6 @@ Available strategies:
 - [SlidingWindowStrategy](./sliding-window/README.md)
 - [ToolResultDecayStrategy](./tool-result-decay/README.md)
 - [SummarizationStrategy](./summarization/README.md)
-- [LLMSummarizationStrategy](./llm-summarization/README.md)
 - [ScratchpadStrategy](./scratchpad/README.md)
 - [PinnedMessagesStrategy](./pinned-messages/README.md)
 - [CompactionToolStrategy](./compaction-tool/README.md)

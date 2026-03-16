@@ -169,10 +169,11 @@ export interface ContextWindowStatusStrategyOptions {
     }) => number | undefined;
 }
 export interface SummarizationStrategyOptions {
-    summarize: (messages: LanguageModelV3Message[]) => Promise<string>;
     maxPromptTokens: number;
-    keepLastMessages?: number;
+    preserveRecentMessages?: number;
     estimator?: PromptTokenEstimator;
+    summarize?: (messages: LanguageModelV3Message[]) => Promise<string>;
+    model?: LanguageModel;
 }
 export interface LlmSummarizerFormattingOptions {
     maxTranscriptChars?: number;
@@ -181,13 +182,6 @@ export interface LlmSummarizerFormattingOptions {
 }
 export interface LlmSummarizerOptions {
     model: LanguageModel;
-    providerOptions?: LanguageModelV3CallOptions["providerOptions"];
-    maxOutputTokens?: number;
-    systemPrompt?: string;
-    temperature?: number;
-    formatting?: LlmSummarizerFormattingOptions;
-}
-export interface LLMSummarizationStrategyOptions extends Omit<SummarizationStrategyOptions, "summarize">, LlmSummarizerOptions {
 }
 export interface CompactionStoreKey {
     conversationId: string;

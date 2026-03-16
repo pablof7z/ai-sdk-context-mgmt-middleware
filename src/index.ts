@@ -5,7 +5,6 @@ export { ToolResultDecayStrategy } from "./strategies/tool-result-decay/index.js
 export { SystemPromptCachingStrategy } from "./strategies/system-prompt-caching/index.js";
 export { SummarizationStrategy } from "./strategies/summarization/index.js";
 export {
-  LLMSummarizationStrategy,
   buildDeterministicSummary,
   buildSummaryTranscript,
   createLlmSummarizer,
@@ -35,7 +34,6 @@ export type {
   ContextUtilizationReminderStrategyOptions,
   CreateContextManagementRuntimeOptions,
   DecayedToolContext,
-  LLMSummarizationStrategyOptions,
   LlmSummarizerFormattingOptions,
   LlmSummarizerOptions,
   PinnedMessagesStrategyOptions,

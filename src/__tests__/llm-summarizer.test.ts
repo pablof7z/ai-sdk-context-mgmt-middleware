@@ -8,7 +8,7 @@ mock.module("ai", () => ({
 }));
 
 import {
-  LLMSummarizationStrategy,
+  SummarizationStrategy,
   buildDeterministicSummary,
   buildSummaryTranscript,
   createLlmSummarizer,
@@ -112,8 +112,6 @@ describe("LLM-backed summarization", () => {
 
     const summarize = createLlmSummarizer({
       model,
-      providerOptions: { testProvider: { mode: "summary" } } as any,
-      maxOutputTokens: 321,
     });
 
     const summary = await summarize([
@@ -125,8 +123,7 @@ describe("LLM-backed summarization", () => {
     expect(mockGenerateText.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         model,
-        providerOptions: { testProvider: { mode: "summary" } },
-        maxOutputTokens: 321,
+        maxOutputTokens: 1200,
         temperature: 0,
       })
     );
@@ -134,13 +131,13 @@ describe("LLM-backed summarization", () => {
     expect(summary).toContain("parser.ts");
   });
 
-  test("LLMSummarizationStrategy delegates summarization to the model-backed helper", async () => {
+  test("SummarizationStrategy uses the model-backed helper when model is provided", async () => {
     mockGenerateText.mockResolvedValueOnce({
       text: "Key Findings\n- Parser issue in /tmp/parser.ts",
       usage: { inputTokens: 10, outputTokens: 10 },
     });
 
-    const strategy = new LLMSummarizationStrategy({
+    const strategy = new SummarizationStrategy({
       model: {
         specificationVersion: "v3",
         provider: "mock",
@@ -154,7 +151,7 @@ describe("LLM-backed summarization", () => {
         },
       } as any,
       maxPromptTokens: 200,
-      keepLastMessages: 1,
+      preserveRecentMessages: 1,
       estimator,
     });
 
@@ -185,5 +182,55 @@ describe("LLM-backed summarization", () => {
         }),
       })
     );
+  });
+
+  test("SummarizationStrategy prefers summarize over model when both are provided", async () => {
+    const summarize = mock(async () => "custom summary");
+
+    const strategy = new SummarizationStrategy({
+      summarize,
+      model: {
+        specificationVersion: "v3",
+        provider: "mock",
+        modelId: "mock",
+        supportedUrls: {},
+        doGenerate: async () => {
+          throw new Error("unused");
+        },
+        doStream: async () => {
+          throw new Error("unused");
+        },
+      } as any,
+      maxPromptTokens: 200,
+      preserveRecentMessages: 1,
+      estimator,
+    });
+
+    const state = createMockState([
+      { role: "system", content: "system" },
+      { role: "user", content: [{ type: "text", text: "old request" }] },
+      { role: "assistant", content: [{ type: "text", text: "old answer" }] },
+      { role: "user", content: [{ type: "text", text: "latest request" }] },
+    ]);
+
+    await strategy.apply(state);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(state.prompt[1]).toEqual(
+      expect.objectContaining({
+        role: "system",
+        content: "custom summary",
+      })
+    );
+  });
+
+  test("SummarizationStrategy throws when neither summarize nor model is provided", () => {
+    expect(() =>
+      new SummarizationStrategy({
+        maxPromptTokens: 200,
+        estimator,
+      })
+    ).toThrow("SummarizationStrategy requires either summarize or model");
   });
 });

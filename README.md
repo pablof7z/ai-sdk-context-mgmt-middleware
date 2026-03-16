@@ -90,8 +90,7 @@ Per-strategy docs live in [`src/strategies/`](./src/strategies/README.md).
 | `SystemPromptCachingStrategy` | Moves system messages into a stable prefix and can consolidate them | Better cache reuse and less prompt churn | [docs](./src/strategies/system-prompt-caching/README.md) | [06-system-prompt-caching.ts](./examples/06-system-prompt-caching.ts) |
 | `SlidingWindowStrategy` | Keeps the recent tail, can optionally preserve a head, and drops older non-system turns | Bounded context with simple recency bias or setup preservation | [docs](./src/strategies/sliding-window/README.md) | [01-sliding-window.ts](./examples/01-sliding-window.ts) |
 | `ToolResultDecayStrategy` | Leaves recent tool results raw, truncates medium-age ones, masks older ones | Keeps the reasoning chain while shrinking the heaviest payloads | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
-| `SummarizationStrategy` | Replaces older turns with a tagged summary block | Older facts survive in compressed form | [docs](./src/strategies/summarization/README.md) | [03-summarization.ts](./examples/03-summarization.ts) |
-| `LLMSummarizationStrategy` | Uses an AI SDK model to produce the summary block | Better summaries with less host-side wiring | [docs](./src/strategies/llm-summarization/README.md) | [07-llm-summarization.ts](./examples/07-llm-summarization.ts) |
+| `SummarizationStrategy` | Replaces older turns with a tagged summary block using either `summarize(...)` or `model` | Older facts survive in compressed form without replaying the whole middle | [docs](./src/strategies/summarization/README.md) | [03-summarization.ts](./examples/03-summarization.ts), [07-model-backed-summarization.ts](./examples/07-model-backed-summarization.ts) |
 | `ScratchpadStrategy` | Injects persisted scratchpad state and can remove stale tool exchanges | Structured working state, note edits, and selective forgetting | [docs](./src/strategies/scratchpad/README.md) | [08-scratchpad.ts](./examples/08-scratchpad.ts) |
 | `PinnedMessagesStrategy` | Marks specific tool call IDs as protected before pruning | Lets the agent keep the evidence it considers critical | [docs](./src/strategies/pinned-messages/README.md) | [09-pinned-messages.ts](./examples/09-pinned-messages.ts) |
 | `CompactionToolStrategy` | Compacts old history only after the agent asks for it | Agent-controlled compression at task boundaries | [docs](./src/strategies/compaction-tool/README.md) | [10-compaction-tool.ts](./examples/10-compaction-tool.ts) |
@@ -112,7 +111,7 @@ In practice that usually means:
 
 1. `SystemPromptCachingStrategy`
 2. `PinnedMessagesStrategy`
-3. `SlidingWindowStrategy` (optionally with `headCount`), `ToolResultDecayStrategy`, `SummarizationStrategy`, or `LLMSummarizationStrategy`
+3. `SlidingWindowStrategy` (optionally with `headCount`), `ToolResultDecayStrategy`, or `SummarizationStrategy`
 4. `ScratchpadStrategy` or `CompactionToolStrategy`
 5. `ContextUtilizationReminderStrategy`
 
@@ -121,7 +120,7 @@ In practice that usually means:
 - Short, bounded conversations: `SlidingWindowStrategy`
 - Preserve setup plus the latest turns: `SlidingWindowStrategy({ headCount, keepLastMessages })`
 - Tool-heavy agents: `SystemPromptCachingStrategy` + `ToolResultDecayStrategy`
-- Long-running agents: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ToolResultDecayStrategy` + `LLMSummarizationStrategy`
+- Long-running agents: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ToolResultDecayStrategy` + `SummarizationStrategy({ model })`
 - Agents that self-manage context: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ScratchpadStrategy` + `CompactionToolStrategy`
 - Full graduated stack: run [`examples/04-composed-strategies.ts`](./examples/04-composed-strategies.ts)
 
@@ -137,7 +136,7 @@ All examples are local and deterministic. They use mock models, print the transf
 | [04-composed-strategies.ts](./examples/04-composed-strategies.ts) | `cd examples && npx tsx 04-composed-strategies.ts` | Multiple strategies stack cleanly and telemetry shows what ran |
 | [05-sliding-window-head.ts](./examples/05-sliding-window-head.ts) | `cd examples && npx tsx 05-sliding-window-head.ts` | Setup context and the latest blocker remain, but the middle drops out |
 | [06-system-prompt-caching.ts](./examples/06-system-prompt-caching.ts) | `cd examples && npx tsx 06-system-prompt-caching.ts` | System instructions consolidate into a stable prefix |
-| [07-llm-summarization.ts](./examples/07-llm-summarization.ts) | `cd examples && npx tsx 07-llm-summarization.ts` | A model-generated summary replaces older discussion |
+| [07-model-backed-summarization.ts](./examples/07-model-backed-summarization.ts) | `cd examples && npx tsx 07-model-backed-summarization.ts` | A model-generated summary replaces older discussion |
 | [08-scratchpad.ts](./examples/08-scratchpad.ts) | `cd examples && npx tsx 08-scratchpad.ts` | `scratchpad(...)` changes what the next turn sees |
 | [09-pinned-messages.ts](./examples/09-pinned-messages.ts) | `cd examples && npx tsx 09-pinned-messages.ts` | One pinned tool result survives while other old ones decay |
 | [10-compaction-tool.ts](./examples/10-compaction-tool.ts) | `cd examples && npx tsx 10-compaction-tool.ts` | `compact_context(...)` compacts now and reuses the stored summary later |

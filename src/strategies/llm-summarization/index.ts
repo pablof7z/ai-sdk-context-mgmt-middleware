@@ -4,14 +4,9 @@ import type {
 } from "@ai-sdk/provider";
 import { generateText, type ModelMessage } from "ai";
 import type {
-  ContextManagementStrategy,
-  ContextManagementStrategyExecution,
-  ContextManagementStrategyState,
-  LLMSummarizationStrategyOptions,
   LlmSummarizerFormattingOptions,
   LlmSummarizerOptions,
 } from "../../types.js";
-import { SummarizationStrategy } from "../summarization/index.js";
 
 const DEFAULT_SUMMARY_SYSTEM_PROMPT =
   "Compress older agent context into a concise factual summary. Preserve exact file paths, tool names, command names, errors, decisions, open questions, and TODOs. Do not invent details. Return plain text with short sections for Key Findings, Files/Artifacts, Errors, Decisions, Open Questions, and TODOs.";
@@ -171,14 +166,8 @@ export function buildDeterministicSummary(
 export function createLlmSummarizer(
   options: LlmSummarizerOptions
 ): (messages: LanguageModelV3Message[]) => Promise<string> {
-  const formatting = resolveFormattingOptions(options.formatting);
-  const systemPrompt =
-    options.systemPrompt?.trim() || DEFAULT_SUMMARY_SYSTEM_PROMPT;
-  const maxOutputTokens = Math.max(
-    1,
-    Math.floor(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)
-  );
-  const temperature = options.temperature ?? 0;
+  const formatting = resolveFormattingOptions();
+  const systemPrompt = DEFAULT_SUMMARY_SYSTEM_PROMPT;
 
   return async (messages: LanguageModelV3Message[]) => {
     const transcript = buildSummaryTranscript(messages, formatting);
@@ -199,9 +188,8 @@ export function createLlmSummarizer(
       const { text } = await generateText({
         model: options.model,
         messages: summaryPrompt,
-        providerOptions: options.providerOptions,
-        maxOutputTokens,
-        temperature,
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        temperature: 0,
       });
 
       const summary = text.trim();
@@ -210,24 +198,4 @@ export function createLlmSummarizer(
       return deterministicFallback;
     }
   };
-}
-
-export class LLMSummarizationStrategy implements ContextManagementStrategy {
-  readonly name = "llm-summarization";
-  private readonly delegate: SummarizationStrategy;
-
-  constructor(options: LLMSummarizationStrategyOptions) {
-    this.delegate = new SummarizationStrategy({
-      summarize: createLlmSummarizer(options),
-      maxPromptTokens: options.maxPromptTokens,
-      keepLastMessages: options.keepLastMessages,
-      estimator: options.estimator,
-    });
-  }
-
-  apply(
-    state: ContextManagementStrategyState
-  ): Promise<ContextManagementStrategyExecution> {
-    return this.delegate.apply(state);
-  }
 }

@@ -49,7 +49,7 @@ npx tsx 01-sliding-window.ts
 - shows plain system prompts consolidating into one stable prefix
 - look for non-system message order staying unchanged
 
-### `07-llm-summarization.ts`
+### `07-model-backed-summarization.ts`
 
 - shows model-backed summarization
 - look for an LLM-generated summary message replacing older turns

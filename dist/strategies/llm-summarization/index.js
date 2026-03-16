@@ -1,5 +1,4 @@
 import { generateText } from "ai";
-import { SummarizationStrategy } from "../summarization/index.js";
 const DEFAULT_SUMMARY_SYSTEM_PROMPT = "Compress older agent context into a concise factual summary. Preserve exact file paths, tool names, command names, errors, decisions, open questions, and TODOs. Do not invent details. Return plain text with short sections for Key Findings, Files/Artifacts, Errors, Decisions, Open Questions, and TODOs.";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1200;
 const DEFAULT_MAX_TRANSCRIPT_CHARS = 12000;
@@ -92,10 +91,8 @@ export function buildDeterministicSummary(messages, formatting) {
     return lines.join("\n");
 }
 export function createLlmSummarizer(options) {
-    const formatting = resolveFormattingOptions(options.formatting);
-    const systemPrompt = options.systemPrompt?.trim() || DEFAULT_SUMMARY_SYSTEM_PROMPT;
-    const maxOutputTokens = Math.max(1, Math.floor(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS));
-    const temperature = options.temperature ?? 0;
+    const formatting = resolveFormattingOptions();
+    const systemPrompt = DEFAULT_SUMMARY_SYSTEM_PROMPT;
     return async (messages) => {
         const transcript = buildSummaryTranscript(messages, formatting);
         const deterministicFallback = buildDeterministicSummary(messages, formatting);
@@ -113,9 +110,8 @@ export function createLlmSummarizer(options) {
             const { text } = await generateText({
                 model: options.model,
                 messages: summaryPrompt,
-                providerOptions: options.providerOptions,
-                maxOutputTokens,
-                temperature,
+                maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+                temperature: 0,
             });
             const summary = text.trim();
             return summary.length > 0 ? summary : deterministicFallback;
@@ -124,19 +120,4 @@ export function createLlmSummarizer(options) {
             return deterministicFallback;
         }
     };
-}
-export class LLMSummarizationStrategy {
-    name = "llm-summarization";
-    delegate;
-    constructor(options) {
-        this.delegate = new SummarizationStrategy({
-            summarize: createLlmSummarizer(options),
-            maxPromptTokens: options.maxPromptTokens,
-            keepLastMessages: options.keepLastMessages,
-            estimator: options.estimator,
-        });
-    }
-    apply(state) {
-        return this.delegate.apply(state);
-    }
 }

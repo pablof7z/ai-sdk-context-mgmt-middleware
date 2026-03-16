@@ -4,7 +4,7 @@ export { ScratchpadStrategy } from "./strategies/scratchpad/index.js";
 export { ToolResultDecayStrategy } from "./strategies/tool-result-decay/index.js";
 export { SystemPromptCachingStrategy } from "./strategies/system-prompt-caching/index.js";
 export { SummarizationStrategy } from "./strategies/summarization/index.js";
-export { LLMSummarizationStrategy, buildDeterministicSummary, buildSummaryTranscript, createLlmSummarizer, } from "./strategies/llm-summarization/index.js";
+export { buildDeterministicSummary, buildSummaryTranscript, createLlmSummarizer, } from "./strategies/llm-summarization/index.js";
 export { ContextUtilizationReminderStrategy } from "./strategies/context-utilization-reminder/index.js";
 export { ContextWindowStatusStrategy } from "./strategies/context-window-status/index.js";
 export { CompactionToolStrategy } from "./strategies/compaction-tool/index.js";
