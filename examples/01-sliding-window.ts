@@ -1,5 +1,5 @@
 /**
- * Sliding Window — keep the recent tail, drop older turns
+ * Sliding Window — keep the recent tail, or preserve a head plus tail
  */
 import { generateText, wrapLanguageModel, type ModelMessage } from "ai";
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";

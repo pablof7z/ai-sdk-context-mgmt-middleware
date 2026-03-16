@@ -300,12 +300,12 @@ export function removeToolExchanges(prompt, toolCallIds, reason) {
     };
 }
 export function trimPromptToLastMessages(prompt, keepLastMessages, reason, options) {
+    const normalizedHeadCount = Math.max(0, Math.floor(options?.headCount ?? 0));
     const normalizedKeepLastMessages = Math.max(0, Math.floor(keepLastMessages));
     const nonSystemMessageCount = prompt.reduce((count, message) => count + (message.role === "system" ? 0 : 1), 0);
     const estimator = options?.estimator ?? createDefaultPromptTokenEstimator();
     const maxPromptTokens = options?.maxPromptTokens;
-    const pinnedMessageIndices = getPinnedMessageIndices(prompt, options?.pinnedToolCallIds ?? new Set());
-    if (normalizedKeepLastMessages >= nonSystemMessageCount &&
+    if (normalizedHeadCount + normalizedKeepLastMessages >= nonSystemMessageCount &&
         (maxPromptTokens === undefined || estimator.estimatePrompt(prompt) <= maxPromptTokens)) {
         return {
             prompt: clonePrompt(prompt),
@@ -317,22 +317,9 @@ export function trimPromptToLastMessages(prompt, keepLastMessages, reason, optio
         removedToolExchanges: [],
     };
     for (let keep = Math.min(normalizedKeepLastMessages, nonSystemMessageCount); keep >= 0; keep--) {
-        const startIndex = computeTailStartIndex(prompt, keep);
-        const keptIndices = new Set(pinnedMessageIndices);
-        for (let index = startIndex; index < prompt.length; index++) {
-            if (prompt[index].role !== "system") {
-                keptIndices.add(index);
-            }
-        }
-        const nextPrompt = keptIndices.size === 0
-            ? buildPromptFromTail(prompt, prompt.length)
-            : buildPromptFromSelectedIndices(prompt, keptIndices);
-        const result = {
-            prompt: nextPrompt,
-            removedToolExchanges: buildRemovedToolExchanges(prompt, nextPrompt, reason),
-        };
+        const result = trimPromptHeadAndTail(prompt, normalizedHeadCount, keep, reason, { pinnedToolCallIds: options?.pinnedToolCallIds });
         bestResult = result;
-        if (maxPromptTokens === undefined || estimator.estimatePrompt(nextPrompt) <= maxPromptTokens) {
+        if (maxPromptTokens === undefined || estimator.estimatePrompt(result.prompt) <= maxPromptTokens) {
             return result;
         }
     }

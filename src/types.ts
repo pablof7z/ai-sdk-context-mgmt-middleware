@@ -277,6 +277,7 @@ export interface PinnedMessagesStrategyOptions {
 }
 
 export interface SlidingWindowStrategyOptions {
+  headCount?: number;
   keepLastMessages?: number;
   maxPromptTokens?: number;
   estimator?: PromptTokenEstimator;

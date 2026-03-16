@@ -11,11 +11,13 @@ const DEFAULT_KEEP_LAST_MESSAGES = 8;
 
 export class SlidingWindowStrategy implements ContextManagementStrategy {
   readonly name = "sliding-window";
+  private readonly headCount: number;
   private readonly keepLastMessages: number;
   private readonly maxPromptTokens?: number;
   private readonly estimator;
 
   constructor(options: SlidingWindowStrategyOptions = {}) {
+    this.headCount = Math.max(0, Math.floor(options.headCount ?? 0));
     this.keepLastMessages = Math.max(0, Math.floor(options.keepLastMessages ?? DEFAULT_KEEP_LAST_MESSAGES));
     this.maxPromptTokens = options.maxPromptTokens;
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
@@ -27,6 +29,7 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
       this.keepLastMessages,
       "sliding-window",
       {
+        headCount: this.headCount,
         estimator: this.estimator,
         maxPromptTokens: this.maxPromptTokens,
         pinnedToolCallIds: state.pinnedToolCallIds,
@@ -38,9 +41,12 @@ export class SlidingWindowStrategy implements ContextManagementStrategy {
     state.addRemovedToolExchanges(result.removedToolExchanges);
 
     return {
-      reason: result.removedToolExchanges.length > 0 ? "tail-trimmed" : "window-evaluated",
+      reason: messagesRemoved > 0
+        ? this.headCount > 0 ? "window-trimmed" : "tail-trimmed"
+        : "window-evaluated",
       workingTokenBudget: this.maxPromptTokens,
       payloads: {
+        headCount: this.headCount,
         keepLastMessages: this.keepLastMessages,
         maxPromptTokens: this.maxPromptTokens,
         messagesRemoved,

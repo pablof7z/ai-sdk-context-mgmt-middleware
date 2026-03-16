@@ -1,18 +1,43 @@
 # ScratchpadStrategy
 
-Lets an agent maintain current working state for future turns and selectively remove stale tool exchanges.
+If an agent works across many turns, the raw transcript quickly becomes a bad working-memory layer. Important decisions get buried under old tool output, side effects are easy to forget, and the model starts paying for context it no longer needs.
+
+`ScratchpadStrategy` gives the agent an explicit place to keep its current state. The model can rewrite what matters into a compact set of entries, drop stale tool exchanges after capturing the important bits, and see that distilled state injected back into the next turn.
+
+This is the strategy to use when you want the agent to actively manage its own context instead of waiting for the host to summarize or prune it.
+
+## Why You'd Use It
+
+- keeps long-running coding or research agents from re-reading dead context
+- gives the model a stable place to track decisions, findings, side effects, and next steps
+- makes it safer to remove old tool output once the useful facts have been captured
+- lets multiple agents in the same conversation share a lightweight working-state view
 
 ## What Changes In The Prompt
 
-- omitted tool exchanges are removed
+- tool exchanges listed in `omitToolCallIds` are removed
+- older non-system messages can be trimmed with `keepLastMessages`
 - a reminder block is appended to the latest user message
-- the reminder can include this agent's scratchpad entries and other agents' scratchpads
+- that reminder can include this agent's scratchpad entries and other agents' scratchpads
 
-## What The Agent Gets
+## What It Actually Does
 
-- a place to preserve intermediate findings as key/value entries, including multiline values
-- control over which old tool outputs should disappear
-- lightweight coordination across agents in the same conversation
+On each turn, the strategy reads the persisted scratchpad state for the current agent and conversation. It can then:
+
+- hide old tool exchanges the agent previously marked as safe to omit
+- shrink the visible transcript while still preserving the conversation start and recent tail
+- inject the agent's current working state back into the prompt as a reminder block
+
+The key idea is that the scratchpad is not a chronological log. It is a living state snapshot that the model keeps rewriting as the task evolves.
+
+## Mental Model
+
+Think of the scratchpad as the agent's whiteboard:
+
+- raw transcript: everything that happened
+- scratchpad: what still matters
+
+The transcript is noisy but complete. The scratchpad is compact but curated. The agent should copy durable facts into the scratchpad, then aggressively stop carrying raw context that no longer earns its cost.
 
 ## Scratchpad Tool Surface
 
@@ -26,12 +51,36 @@ The optional `scratchpad(...)` tool accepts:
 
 Entry names are intentionally open-ended. Agents can use any keys that fit the task, instead of being forced into a fixed schema.
 
+## Good Entry Shapes
+
+- `objective`: what the agent is trying to accomplish right now
+- `findings`: durable facts learned from tools or inspection
+- `notes`: multiline freeform context when a single sentence is not enough
+- `side-effects`: actions already taken that should not be repeated
+- `next-steps`: what to do next without re-deriving the plan
+
 ## Recommended Usage Pattern
 
-- Keep the scratchpad as current state, not a chronological log
-- Use key/value entries for stable buckets such as objective, thesis, findings, notes, side-effects, or next-steps
-- Use multiline values when a bucket needs more freeform text
-- Once an insight is captured, omit stale tool exchanges from active context
+- treat the scratchpad as current state, not a log of every action
+- rewrite stale entries instead of appending forever
+- move important facts out of raw tool output and into entries
+- once an insight is captured, omit the stale tool exchange from active context
+- use `keepLastMessages` when the scratchpad is good enough that the model no longer needs the full middle of the transcript
+
+## When To Reach For It
+
+Use `ScratchpadStrategy` when:
+
+- the agent performs multi-step work across many turns
+- tool results are verbose, but only a few facts remain relevant
+- you want the model itself to decide what state should persist
+- you want some cross-agent visibility inside the same conversation
+
+Skip it when:
+
+- the interaction is short-lived and mostly stateless
+- the host should own all compaction and memory policy
+- you want pure automatic summarization rather than model-managed working memory
 
 ## Runnable Example
 

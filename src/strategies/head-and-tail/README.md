@@ -2,6 +2,8 @@
 
 Keeps the beginning and end of a conversation while dropping the middle.
 
+This is equivalent to `SlidingWindowStrategy({ headCount, keepLastMessages })` and remains available as a compatibility alias for readability and backwards compatibility.
+
 ## What Changes In The Prompt
 
 - the opening setup remains

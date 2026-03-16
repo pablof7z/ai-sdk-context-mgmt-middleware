@@ -1,4 +1,4 @@
-import { SlidingWindowStrategy } from "../index.js";
+import { HeadAndTailStrategy, SlidingWindowStrategy } from "../index.js";
 import { createContextManagementRuntime } from "../runtime.js";
 import { makePrompt } from "./helpers.js";
 
@@ -84,5 +84,67 @@ describe("SlidingWindowStrategy", () => {
 
     const nonSystemCount = result?.prompt.filter((message) => message.role !== "system").length;
     expect(nonSystemCount).toBe(1);
+  });
+
+  test("supports preserving a head segment via headCount", () => {
+    const prompt = makePrompt();
+    const strategy = new SlidingWindowStrategy({ headCount: 1, keepLastMessages: 2 });
+    const state = {
+      prompt,
+      removedToolExchanges: [],
+      params: { prompt, providerOptions: {} },
+      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
+      pinnedToolCallIds: new Set<string>(),
+      updatePrompt(nextPrompt: any) {
+        this.prompt = nextPrompt;
+      },
+      updateParams() {},
+      addRemovedToolExchanges() {},
+      addPinnedToolCallIds() {},
+    };
+
+    strategy.apply(state as any);
+
+    expect(state.prompt.map((message: any) => message.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+    ]);
+  });
+
+  test("matches HeadAndTailStrategy when headCount is set", () => {
+    const slidingState = {
+      prompt: makePrompt(),
+      removedToolExchanges: [],
+      params: { prompt: makePrompt(), providerOptions: {} },
+      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
+      pinnedToolCallIds: new Set<string>(),
+      updatePrompt(prompt: any) {
+        this.prompt = prompt;
+      },
+      updateParams() {},
+      addRemovedToolExchanges() {},
+      addPinnedToolCallIds() {},
+    };
+    const headAndTailState = {
+      prompt: makePrompt(),
+      removedToolExchanges: [],
+      params: { prompt: makePrompt(), providerOptions: {} },
+      requestContext: { conversationId: "conv-1", agentId: "agent-1" },
+      pinnedToolCallIds: new Set<string>(),
+      updatePrompt(prompt: any) {
+        this.prompt = prompt;
+      },
+      updateParams() {},
+      addRemovedToolExchanges() {},
+      addPinnedToolCallIds() {},
+    };
+
+    new SlidingWindowStrategy({ headCount: 1, keepLastMessages: 2 }).apply(slidingState as any);
+    new HeadAndTailStrategy({ headCount: 1, tailCount: 2 }).apply(headAndTailState as any);
+
+    expect(slidingState.prompt).toEqual(headAndTailState.prompt);
   });
 });

@@ -22,6 +22,7 @@ export declare function removeToolExchanges(prompt: LanguageModelV3Prompt, toolC
     removedToolExchanges: RemovedToolExchange[];
 };
 export declare function trimPromptToLastMessages(prompt: LanguageModelV3Prompt, keepLastMessages: number, reason: string, options?: {
+    headCount?: number;
     estimator?: PromptTokenEstimator;
     maxPromptTokens?: number;
     pinnedToolCallIds?: ReadonlySet<string>;

@@ -1,5 +1,5 @@
 /**
- * Head and Tail — preserve setup plus the latest turns
+ * Head and Tail — compatibility alias for SlidingWindowStrategy({ headCount, keepLastMessages })
  */
 import { generateText, wrapLanguageModel, type ModelMessage } from "ai";
 import type { LanguageModelV3Prompt } from "@ai-sdk/provider";

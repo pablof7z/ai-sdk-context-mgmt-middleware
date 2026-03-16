@@ -88,8 +88,8 @@ Per-strategy docs live in [`src/strategies/`](./src/strategies/README.md).
 | Strategy | What changes in the prompt | What the agent gets | Docs | Runnable example |
 | --- | --- | --- | --- | --- |
 | `SystemPromptCachingStrategy` | Moves system messages into a stable prefix and can consolidate them | Better cache reuse and less prompt churn | [docs](./src/strategies/system-prompt-caching/README.md) | [06-system-prompt-caching.ts](./examples/06-system-prompt-caching.ts) |
-| `SlidingWindowStrategy` | Keeps the recent tail and drops older non-system turns | Bounded context with simple recency bias | [docs](./src/strategies/sliding-window/README.md) | [01-sliding-window.ts](./examples/01-sliding-window.ts) |
-| `HeadAndTailStrategy` | Keeps the beginning and end, drops the middle | Preserves initial instructions plus current work | [docs](./src/strategies/head-and-tail/README.md) | [05-head-and-tail.ts](./examples/05-head-and-tail.ts) |
+| `SlidingWindowStrategy` | Keeps the recent tail, can optionally preserve a head, and drops older non-system turns | Bounded context with simple recency bias or setup preservation | [docs](./src/strategies/sliding-window/README.md) | [01-sliding-window.ts](./examples/01-sliding-window.ts) |
+| `HeadAndTailStrategy` | Compatibility alias for `SlidingWindowStrategy({ headCount, keepLastMessages })` | Preserves existing code and naming while using the same trim behavior | [docs](./src/strategies/head-and-tail/README.md) | [05-head-and-tail.ts](./examples/05-head-and-tail.ts) |
 | `ToolResultDecayStrategy` | Leaves recent tool results raw, truncates medium-age ones, masks older ones | Keeps the reasoning chain while shrinking the heaviest payloads | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
 | `SummarizationStrategy` | Replaces older turns with a tagged summary block | Older facts survive in compressed form | [docs](./src/strategies/summarization/README.md) | [03-summarization.ts](./examples/03-summarization.ts) |
 | `LLMSummarizationStrategy` | Uses an AI SDK model to produce the summary block | Better summaries with less host-side wiring | [docs](./src/strategies/llm-summarization/README.md) | [07-llm-summarization.ts](./examples/07-llm-summarization.ts) |
@@ -113,13 +113,14 @@ In practice that usually means:
 
 1. `SystemPromptCachingStrategy`
 2. `PinnedMessagesStrategy`
-3. `SlidingWindowStrategy`, `HeadAndTailStrategy`, `ToolResultDecayStrategy`, `SummarizationStrategy`, or `LLMSummarizationStrategy`
+3. `SlidingWindowStrategy` (optionally with `headCount`), `HeadAndTailStrategy`, `ToolResultDecayStrategy`, `SummarizationStrategy`, or `LLMSummarizationStrategy`
 4. `ScratchpadStrategy` or `CompactionToolStrategy`
 5. `ContextUtilizationReminderStrategy`
 
 ## Choosing A Stack
 
 - Short, bounded conversations: `SlidingWindowStrategy`
+- Preserve setup plus the latest turns: `SlidingWindowStrategy({ headCount, keepLastMessages })`
 - Tool-heavy agents: `SystemPromptCachingStrategy` + `ToolResultDecayStrategy`
 - Long-running agents: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ToolResultDecayStrategy` + `LLMSummarizationStrategy`
 - Agents that self-manage context: `SystemPromptCachingStrategy` + `PinnedMessagesStrategy` + `ScratchpadStrategy` + `CompactionToolStrategy`
