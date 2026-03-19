@@ -16,7 +16,7 @@ This is the strategy to use when you want the agent to actively manage its own c
 ## What Changes In The Prompt
 
 - tool exchanges listed in `omitToolCallIds` are removed
-- older non-system messages can be trimmed with `keepLastMessages`
+- older non-system messages can be trimmed with `keepLastMessages` anchored to the moment `scratchpad(...)` runs
 - a reminder block is appended to the latest user message
 - that reminder can include this agent's scratchpad entries and other agents' scratchpads
 
@@ -46,7 +46,7 @@ The optional `scratchpad(...)` tool accepts:
 - `setEntries`: merge key/value entries into the scratchpad
 - `replaceEntries`: replace the entire key/value map
 - `removeEntryKeys`: delete specific keys
-- `keepLastMessages`: trim older non-system messages while preserving the original task
+- `keepLastMessages`: trim older non-system messages from before this `scratchpad(...)` call while preserving the original task and all future messages
 - `omitToolCallIds`: remove completed tool exchanges after their important parts are captured
 
 Entry names are intentionally open-ended. Agents can use any keys that fit the task, instead of being forced into a fixed schema.
@@ -65,7 +65,7 @@ Entry names are intentionally open-ended. Agents can use any keys that fit the t
 - rewrite stale entries instead of appending forever
 - move important facts out of raw tool output and into entries
 - once an insight is captured, omit the stale tool exchange from active context
-- use `keepLastMessages` when the scratchpad is good enough that the model no longer needs the full middle of the transcript
+- use `keepLastMessages` when the scratchpad is good enough that the model no longer needs the full middle of the transcript before the current pruning point
 
 ## When To Reach For It
 

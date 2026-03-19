@@ -3,6 +3,7 @@ import {
   getLatestToolActivity,
   removeToolExchanges,
   trimPromptHeadAndTail,
+  trimPromptHeadAndTailAroundAnchor,
 } from "../../prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "../../token-estimator.js";
 import type {
@@ -26,6 +27,25 @@ import {
 } from "./state.js";
 
 const DEFAULT_PRESERVE_HEAD_COUNT = 2;
+
+function getLatestScratchpadToolCallId(state: ContextManagementStrategyState): string | undefined {
+  for (let messageIndex = state.prompt.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = state.prompt[messageIndex];
+
+    if (message.role === "system") {
+      continue;
+    }
+
+    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.content[partIndex];
+      if ((part.type === "tool-call" || part.type === "tool-result") && part.toolName === "scratchpad") {
+        return part.toolCallId;
+      }
+    }
+  }
+
+  return undefined;
+}
 
 function buildScratchpadKey(context: ContextManagementRequestContext): ScratchpadStoreKey {
   return {
@@ -165,15 +185,28 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
     }
 
     if (typeof currentState.keepLastMessages === "number") {
-      const trimResult = trimPromptHeadAndTail(
-        state.prompt,
-        this.preserveHeadCount,
-        currentState.keepLastMessages,
-        "scratchpad",
-        {
-          pinnedToolCallIds: state.pinnedToolCallIds,
-        }
-      );
+      const anchorToolCallId = currentState.keepLastMessagesAnchorToolCallId
+        ?? getLatestScratchpadToolCallId(state);
+      const trimResult = anchorToolCallId
+        ? trimPromptHeadAndTailAroundAnchor(
+          state.prompt,
+          this.preserveHeadCount,
+          currentState.keepLastMessages,
+          anchorToolCallId,
+          "scratchpad",
+          {
+            pinnedToolCallIds: state.pinnedToolCallIds,
+          }
+        )
+        : trimPromptHeadAndTail(
+          state.prompt,
+          this.preserveHeadCount,
+          currentState.keepLastMessages,
+          "scratchpad",
+          {
+            pinnedToolCallIds: state.pinnedToolCallIds,
+          }
+        );
       state.updatePrompt(trimResult.prompt);
       state.addRemovedToolExchanges(trimResult.removedToolExchanges);
     }
@@ -226,6 +259,7 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
         entryCount: Object.keys(currentState.entries ?? {}).length,
         entryCharCount: countEntryChars(currentState.entries),
         keepLastMessages: currentState.keepLastMessages,
+        keepLastMessagesAnchorToolCallId: currentState.keepLastMessagesAnchorToolCallId,
         appliedOmitCount: appliedOmitToolCallIds.length,
         otherScratchpadCount: allScratchpads.length,
         reminderTone: this.reminderTone,

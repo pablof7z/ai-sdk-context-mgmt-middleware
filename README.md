@@ -197,7 +197,7 @@ The tool supports:
 - `setEntries`: merge key/value entries into the scratchpad
 - `replaceEntries`: replace all key/value entries
 - `removeEntryKeys`: delete specific entries by key
-- `keepLastMessages`: trim older non-system messages while preserving the original task
+- `keepLastMessages`: trim older non-system messages relative to the moment `scratchpad(...)` runs while preserving the original task and future messages
 - `omitToolCallIds`: remove completed tool exchanges after the important parts have been captured
 
 Entry names are intentionally unconstrained. Common choices are `objective`, `thesis`, `findings`, `notes`, `side-effects`, and `next-steps`, but the agent can use whatever keys match the task.

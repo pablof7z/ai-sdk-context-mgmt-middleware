@@ -16,6 +16,13 @@ export function normalizeKeepLastMessages(value) {
     }
     return Math.max(0, Math.floor(value));
 }
+export function normalizeAnchorToolCallId(value) {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+}
 export function normalizeEntryMap(value) {
     if (!value || typeof value !== "object") {
         return undefined;
@@ -100,6 +107,7 @@ export function normalizeScratchpadState(state, agentLabel) {
     return {
         ...(entries ? { entries } : {}),
         keepLastMessages: normalizeKeepLastMessages(state?.keepLastMessages),
+        keepLastMessagesAnchorToolCallId: normalizeAnchorToolCallId(state?.keepLastMessagesAnchorToolCallId),
         omitToolCallIds: dedupeStrings(state?.omitToolCallIds ?? []),
         ...(typeof state?.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
         ...(state?.agentLabel || agentLabel ? { agentLabel: state?.agentLabel ?? agentLabel } : {}),

@@ -1,6 +1,6 @@
 import { jsonSchema, tool } from "ai";
 import { CONTEXT_MANAGEMENT_KEY } from "../../../types.js";
-import { dedupeStrings, mergeEntryMaps, normalizeEntryMap, normalizeKeepLastMessages, normalizeScratchpadState, removeEntryKeys, } from "../state.js";
+import { dedupeStrings, mergeEntryMaps, normalizeAnchorToolCallId, normalizeEntryMap, normalizeKeepLastMessages, normalizeScratchpadState, removeEntryKeys, } from "../state.js";
 function buildScratchpadKey(context) {
     return {
         conversationId: context.conversationId,
@@ -70,7 +70,7 @@ export function createScratchpadTool(options) {
                             type: "null",
                         },
                     ],
-                    description: "Number of recent non-system messages to keep. The conversation start (original task) is always preserved. Messages in between are dropped. Use null to clear.",
+                    description: "Number of recent non-system messages to keep from immediately before this scratchpad call. The conversation start (original task) is always preserved, and messages after this scratchpad call continue to accumulate normally. Use null to clear.",
                 },
                 omitToolCallIds: {
                     type: "array",
@@ -92,11 +92,18 @@ export function createScratchpadTool(options) {
                 ? mergeEntryMaps(replacedEntries, input.setEntries)
                 : replacedEntries;
             const nextEntries = removeEntryKeys(mergedEntries, input.removeEntryKeys);
+            const keepLastMessages = normalizeKeepLastMessages(input.keepLastMessages);
+            const keepLastMessagesAnchorToolCallId = input.keepLastMessages !== undefined
+                ? normalizeAnchorToolCallId(executeOptions.toolCallId)
+                : currentState.keepLastMessagesAnchorToolCallId;
             await options.scratchpadStore.set(key, {
                 ...(nextEntries ? { entries: nextEntries } : {}),
                 ...(input.keepLastMessages !== undefined
-                    ? { keepLastMessages: normalizeKeepLastMessages(input.keepLastMessages) }
+                    ? { keepLastMessages }
                     : { keepLastMessages: currentState.keepLastMessages }),
+                ...(keepLastMessagesAnchorToolCallId !== undefined
+                    ? { keepLastMessagesAnchorToolCallId }
+                    : {}),
                 ...(input.omitToolCallIds !== undefined
                     ? { omitToolCallIds: dedupeStrings(input.omitToolCallIds) }
                     : { omitToolCallIds: currentState.omitToolCallIds }),

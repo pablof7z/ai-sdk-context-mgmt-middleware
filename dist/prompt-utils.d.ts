@@ -36,6 +36,12 @@ export declare function trimPromptHeadAndTail(prompt: LanguageModelV3Prompt, hea
     prompt: LanguageModelV3Prompt;
     removedToolExchanges: RemovedToolExchange[];
 };
+export declare function trimPromptHeadAndTailAroundAnchor(prompt: LanguageModelV3Prompt, headCount: number, tailCount: number, anchorToolCallId: string, reason: string, options?: {
+    pinnedToolCallIds?: ReadonlySet<string>;
+}): {
+    prompt: LanguageModelV3Prompt;
+    removedToolExchanges: RemovedToolExchange[];
+};
 export declare function partitionPromptForSummarization(prompt: LanguageModelV3Prompt, keepLastMessages: number, pinnedToolCallIds?: ReadonlySet<string>): {
     systemMessages: LanguageModelV3Message[];
     summarizableMessages: LanguageModelV3Message[];

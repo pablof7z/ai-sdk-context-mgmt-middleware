@@ -1,6 +1,7 @@
 import type { ScratchpadState } from "../../types.js";
 export declare function dedupeStrings(values: readonly string[]): string[];
 export declare function normalizeKeepLastMessages(value: number | null | undefined): number | undefined;
+export declare function normalizeAnchorToolCallId(value: string | null | undefined): string | undefined;
 export declare function normalizeEntryMap(value: Record<string, unknown> | undefined): Record<string, string> | undefined;
 export declare function mergeEntryMaps(currentEntries: Record<string, string> | undefined, nextEntries: Record<string, string> | undefined): Record<string, string> | undefined;
 export declare function removeEntryKeys(entries: Record<string, string> | undefined, keys: readonly string[] | undefined): Record<string, string> | undefined;

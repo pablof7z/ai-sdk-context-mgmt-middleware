@@ -24,6 +24,15 @@ export function normalizeKeepLastMessages(value: number | null | undefined): num
   return Math.max(0, Math.floor(value));
 }
 
+export function normalizeAnchorToolCallId(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 export function normalizeEntryMap(
   value: Record<string, unknown> | undefined
 ): Record<string, string> | undefined {
@@ -139,6 +148,7 @@ export function normalizeScratchpadState(
   return {
     ...(entries ? { entries } : {}),
     keepLastMessages: normalizeKeepLastMessages(state?.keepLastMessages),
+    keepLastMessagesAnchorToolCallId: normalizeAnchorToolCallId(state?.keepLastMessagesAnchorToolCallId),
     omitToolCallIds: dedupeStrings(state?.omitToolCallIds ?? []),
     ...(typeof state?.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
     ...(state?.agentLabel || agentLabel ? { agentLabel: state?.agentLabel ?? agentLabel } : {}),

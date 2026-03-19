@@ -92,6 +92,28 @@ function makeLargePrompt(): LanguageModelV3Prompt {
   ];
 }
 
+function makeAnchoredPrompt(): LanguageModelV3Prompt {
+  return [
+    { role: "system", content: "You are helpful." },
+    { role: "user", content: [{ type: "text", text: "msg-1" }] },
+    { role: "assistant", content: [{ type: "text", text: "msg-2" }] },
+    { role: "user", content: [{ type: "text", text: "msg-3" }] },
+    { role: "assistant", content: [{ type: "text", text: "msg-4" }] },
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "scratch-call-1", toolName: "scratchpad", input: { keepLastMessages: 1 } }],
+    },
+    {
+      role: "tool",
+      content: [{ type: "tool-result", toolCallId: "scratch-call-1", toolName: "scratchpad", output: { type: "json", value: { ok: true } } }],
+    },
+    { role: "assistant", content: [{ type: "text", text: "after-scratchpad" }] },
+    { role: "user", content: [{ type: "text", text: "future-1" }] },
+    { role: "assistant", content: [{ type: "text", text: "future-2" }] },
+    { role: "user", content: [{ type: "text", text: "future-3" }] },
+  ];
+}
+
 describe("ScratchpadStrategy", () => {
   test("scratchpad tool updates only the caller state using experimental_context", async () => {
     const store = new InMemoryScratchpadStore();
@@ -130,6 +152,7 @@ describe("ScratchpadStrategy", () => {
           notes: "Focus on parser cleanup",
         },
         keepLastMessages: 3,
+        keepLastMessagesAnchorToolCallId: "tool-call-1",
         omitToolCallIds: ["call-1"],
       })
     );
@@ -424,7 +447,7 @@ describe("ScratchpadStrategy", () => {
   });
 
   describe("head-preserving trimming", () => {
-    test("keepLastMessages=2 preserves head and tail, drops middle", async () => {
+    test("keepLastMessages anchors trimming at the scratchpad call and preserves future messages", async () => {
       const store = new InMemoryScratchpadStore();
       await store.set(
         { conversationId: "conv-1", agentId: "agent-1" },
@@ -432,102 +455,84 @@ describe("ScratchpadStrategy", () => {
           entries: {
             notes: "working on poems",
           },
-          keepLastMessages: 2,
+          keepLastMessages: 1,
+          keepLastMessagesAnchorToolCallId: "scratch-call-1",
           omitToolCallIds: [],
         }
       );
 
-      // preserveHeadCount defaults to 2
       const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const prompt = makeLargePrompt(); // 10 non-system messages
+      const prompt = makeAnchoredPrompt();
       const state = makeState(prompt);
 
       await strategy.apply(state as any);
 
       const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
 
-      // Head: first 2 non-system messages (msg-1, msg-2)
       expect(texts).toContain("msg-1");
       expect(texts).toContain("msg-2");
-
-      // Tail: last 2 non-system messages (msg-10, msg-11)
-      expect(texts).toContain("msg-10");
-      expect(texts).toContain("msg-11");
-
-      // System always preserved
+      expect(texts).toContain("msg-4");
+      expect(texts).toContain("tool-call:scratch-call-1");
+      expect(texts).toContain("tool-result:scratch-call-1");
+      expect(texts).toContain("after-scratchpad");
+      expect(texts).toContain("future-1");
+      expect(texts).toContain("future-2");
+      expect(texts).toContain("future-3");
       expect(texts).toContain("You are helpful.");
-
-      // Middle should be dropped
       expect(texts).not.toContain("msg-3");
-      expect(texts).not.toContain("msg-6");
-      expect(texts).not.toContain("msg-7");
     });
 
-    test("keepLastMessages preserves pinned tool exchanges in the middle", async () => {
+    test("keepLastMessages=0 still preserves everything after the scratchpad call", async () => {
       const store = new InMemoryScratchpadStore();
       await store.set(
         { conversationId: "conv-1", agentId: "agent-1" },
         {
-          keepLastMessages: 2,
+          keepLastMessages: 0,
+          keepLastMessagesAnchorToolCallId: "scratch-call-1",
           omitToolCallIds: [],
         }
       );
 
       const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const prompt = makeLargePrompt();
-      // Pin call-mid which is in the middle of the prompt
-      const state = makeState(prompt, ["call-mid"]);
-
-      await strategy.apply(state as any);
-
-      const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
-
-      // Pinned exchange should be preserved
-      expect(texts).toContain("tool-call:call-mid");
-      expect(texts).toContain("tool-result:call-mid");
-
-      // Head preserved
-      expect(texts).toContain("msg-1");
-      expect(texts).toContain("msg-2");
-
-      // Tail preserved
-      expect(texts).toContain("msg-10");
-      expect(texts).toContain("msg-11");
-    });
-
-    test("custom preserveHeadCount changes how many head messages are kept", async () => {
-      const store = new InMemoryScratchpadStore();
-      await store.set(
-        { conversationId: "conv-1", agentId: "agent-1" },
-        {
-          keepLastMessages: 2,
-          omitToolCallIds: [],
-        }
-      );
-
-      const strategy = new ScratchpadStrategy({
-        scratchpadStore: store,
-        preserveHeadCount: 4,
-      });
-      const prompt = makeLargePrompt();
+      const prompt = makeAnchoredPrompt();
       const state = makeState(prompt);
 
       await strategy.apply(state as any);
 
       const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
 
-      // Head: first 4 non-system messages
       expect(texts).toContain("msg-1");
       expect(texts).toContain("msg-2");
-      expect(texts).toContain("msg-3");
-      expect(texts).toContain("tool-call:call-mid");
+      expect(texts).toContain("tool-call:scratch-call-1");
+      expect(texts).toContain("tool-result:scratch-call-1");
+      expect(texts).toContain("future-3");
+      expect(texts).not.toContain("msg-3");
+      expect(texts).not.toContain("msg-4");
+    });
 
-      // Tail: last 2
-      expect(texts).toContain("msg-10");
-      expect(texts).toContain("msg-11");
+    test("falls back to the latest scratchpad tool call when anchor is missing from stored state", async () => {
+      const store = new InMemoryScratchpadStore();
+      await store.set(
+        { conversationId: "conv-1", agentId: "agent-1" },
+        {
+          keepLastMessages: 1,
+          omitToolCallIds: [],
+        }
+      );
 
-      // Middle dropped
-      expect(texts).not.toContain("msg-7");
+      const strategy = new ScratchpadStrategy({ scratchpadStore: store });
+      const prompt = makeAnchoredPrompt();
+      const state = makeState(prompt);
+
+      await strategy.apply(state as any);
+
+      const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
+
+      expect(texts).toContain("msg-1");
+      expect(texts).toContain("msg-2");
+      expect(texts).toContain("msg-4");
+      expect(texts).toContain("future-3");
+      expect(texts).not.toContain("msg-3");
     });
   });
 

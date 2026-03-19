@@ -433,6 +433,76 @@ export function trimPromptHeadAndTail(prompt, headCount, tailCount, reason, opti
         removedToolExchanges,
     };
 }
+export function trimPromptHeadAndTailAroundAnchor(prompt, headCount, tailCount, anchorToolCallId, reason, options) {
+    const normalizedHead = Math.max(0, Math.floor(headCount));
+    const normalizedTail = Math.max(0, Math.floor(tailCount));
+    const exchanges = collectToolExchanges(prompt);
+    const anchorExchange = exchanges.get(anchorToolCallId);
+    const anchorStartIndex = anchorExchange?.callMessageIndex
+        ?? anchorExchange?.resultMessageIndices.reduce((min, index) => Math.min(min, index), Number.POSITIVE_INFINITY);
+    if (anchorStartIndex === undefined || !Number.isFinite(anchorStartIndex)) {
+        return {
+            prompt: clonePrompt(prompt),
+            removedToolExchanges: [],
+        };
+    }
+    const preAnchorNonSystemIndices = [];
+    for (let index = 0; index < anchorStartIndex; index += 1) {
+        if (prompt[index].role !== "system") {
+            preAnchorNonSystemIndices.push(index);
+        }
+    }
+    if (preAnchorNonSystemIndices.length <= normalizedHead + normalizedTail) {
+        return {
+            prompt: clonePrompt(prompt),
+            removedToolExchanges: [],
+        };
+    }
+    const keptIndices = getPinnedMessageIndices(prompt, options?.pinnedToolCallIds ?? new Set());
+    const headLimit = Math.min(normalizedHead, preAnchorNonSystemIndices.length);
+    const tailStart = Math.max(headLimit, preAnchorNonSystemIndices.length - normalizedTail);
+    for (let index = 0; index < headLimit; index += 1) {
+        keptIndices.add(preAnchorNonSystemIndices[index]);
+    }
+    for (let index = tailStart; index < preAnchorNonSystemIndices.length; index += 1) {
+        keptIndices.add(preAnchorNonSystemIndices[index]);
+    }
+    for (let index = anchorStartIndex; index < prompt.length; index += 1) {
+        if (prompt[index].role !== "system") {
+            keptIndices.add(index);
+        }
+    }
+    for (;;) {
+        let expanded = false;
+        for (const exchange of exchanges.values()) {
+            const exchangeIndices = [
+                ...(exchange.callMessageIndex !== undefined ? [exchange.callMessageIndex] : []),
+                ...exchange.resultMessageIndices,
+            ];
+            if (exchangeIndices.length === 0) {
+                continue;
+            }
+            const shouldKeepWholeExchange = exchangeIndices.some((index) => keptIndices.has(index));
+            if (!shouldKeepWholeExchange) {
+                continue;
+            }
+            for (const index of exchangeIndices) {
+                if (!keptIndices.has(index)) {
+                    keptIndices.add(index);
+                    expanded = true;
+                }
+            }
+        }
+        if (!expanded) {
+            break;
+        }
+    }
+    const nextPrompt = buildPromptFromSelectedIndices(prompt, keptIndices);
+    return {
+        prompt: nextPrompt,
+        removedToolExchanges: buildRemovedToolExchanges(prompt, nextPrompt, reason),
+    };
+}
 export function partitionPromptForSummarization(prompt, keepLastMessages, pinnedToolCallIds) {
     const normalizedKeepLastMessages = Math.max(0, Math.floor(keepLastMessages));
     const tailStartIndex = computeTailStartIndex(prompt, normalizedKeepLastMessages);

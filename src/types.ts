@@ -290,6 +290,7 @@ export interface ScratchpadStoreKey {
 export interface ScratchpadState {
   entries?: Record<string, string>;
   keepLastMessages?: number | null;
+  keepLastMessagesAnchorToolCallId?: string | null;
   omitToolCallIds: string[];
   updatedAt?: number;
   agentLabel?: string;
