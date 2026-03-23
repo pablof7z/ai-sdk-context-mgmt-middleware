@@ -62,6 +62,7 @@ describe("context management runtime integration", () => {
                   toolCallId: "scratchpad-call-1",
                   toolName: "scratchpad",
                   input: JSON.stringify({
+                    description: "Save parser follow-up",
                     setEntries: {
                       notes: "Track parser follow-up",
                     },

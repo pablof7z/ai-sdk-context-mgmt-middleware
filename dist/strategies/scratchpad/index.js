@@ -1,23 +1,7 @@
-import { getLatestToolActivity, removeToolExchanges, trimPromptHeadAndTail, trimPromptHeadAndTailAroundAnchor, } from "../../prompt-utils.js";
+import { getLatestToolActivity, projectScratchpadPrompt, removeToolExchanges, } from "../../prompt-utils.js";
 import { createDefaultPromptTokenEstimator } from "../../token-estimator.js";
 import { createScratchpadTool } from "./tools/scratchpad.js";
 import { countEntryChars, indentMultiline, normalizeScratchpadState, renderScratchpadState, } from "./state.js";
-const DEFAULT_PRESERVE_HEAD_COUNT = 2;
-function getLatestScratchpadToolCallId(state) {
-    for (let messageIndex = state.prompt.length - 1; messageIndex >= 0; messageIndex -= 1) {
-        const message = state.prompt[messageIndex];
-        if (message.role === "system") {
-            continue;
-        }
-        for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
-            const part = message.content[partIndex];
-            if ((part.type === "tool-call" || part.type === "tool-result") && part.toolName === "scratchpad") {
-                return part.toolCallId;
-            }
-        }
-    }
-    return undefined;
-}
 function buildScratchpadKey(context) {
     return {
         conversationId: context.conversationId,
@@ -44,7 +28,7 @@ function buildReminderBlock(options) {
         }
     }
     if (forced) {
-        lines.push("CRITICAL: Context is nearly full. You MUST:", "1. Record side-effect actions in your scratchpad entries", "2. Set keepLastMessages to trim old messages (e.g. 5-10)", "3. Add completed tool call IDs to omitToolCallIds", "Failure to free context will result in an error.");
+        lines.push("CRITICAL: Context is nearly full. You MUST:", "1. Record side-effect actions in your scratchpad entries", "2. Set preserveTurns to compact older turns (e.g. 2-4)", "3. Add completed tool call IDs to omitToolCallIds", "Failure to free context will result in an error.");
     }
     else if (reminderTone === "informational") {
         if (currentState.entries === undefined || Object.keys(currentState.entries).length === 0) {
@@ -63,7 +47,6 @@ export class ScratchpadStrategy {
     reminderTone;
     workingTokenBudget;
     forceToolThresholdRatio;
-    preserveHeadCount;
     estimator;
     optionalTools;
     forcedOnLastApply = false;
@@ -84,7 +67,6 @@ export class ScratchpadStrategy {
         this.reminderTone = options.reminderTone ?? "informational";
         this.workingTokenBudget = normalizedWorkingTokenBudget;
         this.forceToolThresholdRatio = normalizedForceThresholdRatio;
-        this.preserveHeadCount = Math.max(0, Math.floor(options.preserveHeadCount ?? DEFAULT_PRESERVE_HEAD_COUNT));
         this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
         this.optionalTools = {
             scratchpad: createScratchpadTool({
@@ -101,6 +83,7 @@ export class ScratchpadStrategy {
         return this.optionalTools;
     }
     async apply(state) {
+        const latestToolActivity = getLatestToolActivity(state.prompt);
         const [currentStateRaw, allScratchpadsRaw] = await Promise.all([
             this.scratchpadStore.get(buildScratchpadKey(state.requestContext)),
             this.scratchpadStore.listConversation(state.requestContext.conversationId),
@@ -115,26 +98,16 @@ export class ScratchpadStrategy {
             state.updatePrompt(omissionResult.prompt);
             state.addRemovedToolExchanges(omissionResult.removedToolExchanges);
         }
-        if (typeof currentState.keepLastMessages === "number") {
-            const anchorToolCallId = currentState.keepLastMessagesAnchorToolCallId
-                ?? getLatestScratchpadToolCallId(state);
-            const trimResult = anchorToolCallId
-                ? trimPromptHeadAndTailAroundAnchor(state.prompt, this.preserveHeadCount, currentState.keepLastMessages, anchorToolCallId, "scratchpad", {
-                    pinnedToolCallIds: state.pinnedToolCallIds,
-                })
-                : trimPromptHeadAndTail(state.prompt, this.preserveHeadCount, currentState.keepLastMessages, "scratchpad", {
-                    pinnedToolCallIds: state.pinnedToolCallIds,
-                });
-            state.updatePrompt(trimResult.prompt);
-            state.addRemovedToolExchanges(trimResult.removedToolExchanges);
-        }
+        state.updatePrompt(projectScratchpadPrompt(state.prompt, {
+            preserveTurns: currentState.preserveTurns,
+            notice: currentState.activeNotice,
+        }));
         const estimatedTokens = this.estimator.estimatePrompt(state.prompt)
             + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
         const forceThresholdTokens = this.forceToolThresholdRatio !== undefined
             && this.workingTokenBudget !== undefined
             ? Math.floor(this.workingTokenBudget * this.forceToolThresholdRatio)
             : undefined;
-        const latestToolActivity = getLatestToolActivity(state.prompt);
         const alreadyForcedToScratchpad = state.params?.toolChoice?.type === "tool"
             && state.params?.toolChoice?.toolName === "scratchpad";
         const justCalledScratchpad = latestToolActivity?.toolName === "scratchpad";
@@ -171,8 +144,11 @@ export class ScratchpadStrategy {
             payloads: {
                 entryCount: Object.keys(currentState.entries ?? {}).length,
                 entryCharCount: countEntryChars(currentState.entries),
-                keepLastMessages: currentState.keepLastMessages,
-                keepLastMessagesAnchorToolCallId: currentState.keepLastMessagesAnchorToolCallId,
+                preserveTurns: currentState.preserveTurns,
+                activeNoticeDescription: currentState.activeNotice?.description,
+                activeNoticeToolCallId: currentState.activeNotice?.toolCallId,
+                activeNoticeRawTurnCountAtCall: currentState.activeNotice?.rawTurnCountAtCall,
+                activeNoticeProjectedTurnCountAtCall: currentState.activeNotice?.projectedTurnCountAtCall,
                 appliedOmitCount: appliedOmitToolCallIds.length,
                 otherScratchpadCount: allScratchpads.length,
                 reminderTone: this.reminderTone,

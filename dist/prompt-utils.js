@@ -92,6 +92,188 @@ function isToolResultPart(part) {
 function isRecord(value) {
     return typeof value === "object" && value !== null;
 }
+function isTextPart(part) {
+    return isRecord(part) && part.type === "text" && typeof part.text === "string";
+}
+function getTextParts(content) {
+    if (typeof content === "string") {
+        return content.length > 0 ? [{ type: "text", text: content }] : [];
+    }
+    if (!Array.isArray(content)) {
+        return [];
+    }
+    return content
+        .filter(isTextPart)
+        .map((part) => ({
+        type: "text",
+        text: part.text,
+        providerOptions: cloneUnknown(part.providerOptions),
+    }));
+}
+function hasTextContent(message) {
+    return getTextParts(message.content).length > 0;
+}
+function isScratchpadUseNoticeText(text) {
+    return text.startsWith("<system-reminder>[scratchpad used: ")
+        && text.endsWith("]</system-reminder>");
+}
+function isScratchpadUseNoticeMessage(message) {
+    if (message.role !== "assistant") {
+        return false;
+    }
+    if (Array.isArray(message.content) && message.content.some((part) => !isTextPart(part))) {
+        return false;
+    }
+    const textParts = getTextParts(message.content);
+    return textParts.length === 1 && isScratchpadUseNoticeText(textParts[0].text);
+}
+function cloneAssistantTextMessage(message) {
+    const cloned = cloneMessage(message);
+    if (cloned.role !== "assistant") {
+        return undefined;
+    }
+    const textParts = cloned.content.filter((part) => part.type === "text");
+    if (textParts.length === 0) {
+        return undefined;
+    }
+    return {
+        ...cloned,
+        content: textParts,
+    };
+}
+function extractScratchpadSemanticTurns(prompt) {
+    const turns = [];
+    let openTurn;
+    for (const message of prompt) {
+        if (message.role === "system" || isScratchpadUseNoticeMessage(message)) {
+            continue;
+        }
+        if (message.role === "user") {
+            if (openTurn) {
+                turns.push(openTurn);
+            }
+            openTurn = {
+                user: cloneMessage(message),
+            };
+            continue;
+        }
+        if (message.role === "assistant" && openTurn) {
+            const assistant = cloneAssistantTextMessage(message);
+            if (assistant) {
+                openTurn.assistant = assistant;
+                turns.push(openTurn);
+                openTurn = undefined;
+            }
+        }
+    }
+    if (openTurn) {
+        turns.push(openTurn);
+    }
+    return turns;
+}
+function flattenScratchpadTurns(turns) {
+    const prompt = [];
+    for (const turn of turns) {
+        prompt.push(turn.user);
+        if (turn.assistant) {
+            prompt.push(turn.assistant);
+        }
+    }
+    return prompt;
+}
+function getUnmatchedTurnTail(turns) {
+    const latestTurn = turns.at(-1);
+    return latestTurn && latestTurn.assistant === undefined ? [latestTurn] : [];
+}
+export function buildScratchpadUseNoticeText(description) {
+    return `<system-reminder>[scratchpad used: ${description}]</system-reminder>`;
+}
+export function buildScratchpadUseNoticeMessage(description) {
+    return {
+        role: "assistant",
+        content: [
+            {
+                type: "text",
+                text: buildScratchpadUseNoticeText(description),
+            },
+        ],
+    };
+}
+function inspectScratchpadSemanticTurns(messages) {
+    let openTurnCount = 0;
+    let turnCount = 0;
+    let latestTurnHasAssistant = false;
+    for (const message of messages) {
+        if (message.role === "system" || isScratchpadUseNoticeMessage(message)) {
+            continue;
+        }
+        if (message.role === "user") {
+            turnCount += 1;
+            openTurnCount = 1;
+            latestTurnHasAssistant = false;
+            continue;
+        }
+        if (message.role === "assistant" && openTurnCount > 0 && hasTextContent(message)) {
+            openTurnCount = 0;
+            latestTurnHasAssistant = true;
+        }
+    }
+    return {
+        turnCount,
+        latestTurnHasAssistant,
+    };
+}
+export function countScratchpadSemanticTurns(messages) {
+    return inspectScratchpadSemanticTurns(messages).turnCount;
+}
+export function countProjectedScratchpadTurns(messages, preserveTurns) {
+    const { turnCount, latestTurnHasAssistant } = inspectScratchpadSemanticTurns(messages);
+    const normalizedPreserveTurns = typeof preserveTurns === "number" && Number.isFinite(preserveTurns)
+        ? Math.max(0, Math.floor(preserveTurns))
+        : undefined;
+    if (normalizedPreserveTurns === undefined) {
+        return turnCount;
+    }
+    if (normalizedPreserveTurns === 0) {
+        return turnCount > 0 && !latestTurnHasAssistant ? 1 : 0;
+    }
+    return turnCount <= normalizedPreserveTurns * 2
+        ? turnCount
+        : normalizedPreserveTurns * 2;
+}
+export function projectScratchpadPrompt(prompt, options) {
+    const systemMessages = prompt
+        .filter((message) => message.role === "system")
+        .map((message) => cloneMessage(message));
+    const turns = extractScratchpadSemanticTurns(prompt);
+    const preTurnCount = options.notice
+        ? Math.min(Math.max(0, Math.floor(options.notice.rawTurnCountAtCall)), turns.length)
+        : turns.length;
+    const preTurns = turns.slice(0, preTurnCount);
+    const futureTurns = turns.slice(preTurnCount);
+    const normalizedPreserveTurns = typeof options.preserveTurns === "number" && Number.isFinite(options.preserveTurns)
+        ? Math.max(0, Math.floor(options.preserveTurns))
+        : undefined;
+    let preservedHeadTurns = preTurns;
+    let preservedTailTurns = [];
+    if (normalizedPreserveTurns !== undefined) {
+        if (normalizedPreserveTurns === 0) {
+            preservedHeadTurns = [];
+            preservedTailTurns = getUnmatchedTurnTail(preTurns);
+        }
+        else if (preTurns.length > normalizedPreserveTurns * 2) {
+            preservedHeadTurns = preTurns.slice(0, normalizedPreserveTurns);
+            preservedTailTurns = preTurns.slice(preTurns.length - normalizedPreserveTurns);
+        }
+    }
+    return [
+        ...systemMessages,
+        ...flattenScratchpadTurns(preservedHeadTurns),
+        ...(options.notice ? [buildScratchpadUseNoticeMessage(options.notice.description)] : []),
+        ...flattenScratchpadTurns(preservedTailTurns),
+        ...flattenScratchpadTurns(futureTurns),
+    ];
+}
 export function isContextManagementSystemMessage(message) {
     if (message.role !== "system") {
         return false;

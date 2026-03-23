@@ -10,18 +10,40 @@ export function dedupeStrings(values) {
     }
     return deduped;
 }
-export function normalizeKeepLastMessages(value) {
+export function normalizePreserveTurns(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return undefined;
     }
     return Math.max(0, Math.floor(value));
 }
-export function normalizeAnchorToolCallId(value) {
+function normalizeNonEmptyString(value) {
     if (typeof value !== "string") {
         return undefined;
     }
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
+}
+export function normalizeScratchpadUseNotice(value) {
+    if (!value || typeof value !== "object") {
+        return undefined;
+    }
+    const description = normalizeNonEmptyString(value.description);
+    const toolCallId = normalizeNonEmptyString(value.toolCallId);
+    const rawTurnCountAtCall = typeof value.rawTurnCountAtCall === "number" && Number.isFinite(value.rawTurnCountAtCall)
+        ? Math.max(0, Math.floor(value.rawTurnCountAtCall))
+        : undefined;
+    const projectedTurnCountAtCall = typeof value.projectedTurnCountAtCall === "number" && Number.isFinite(value.projectedTurnCountAtCall)
+        ? Math.max(0, Math.floor(value.projectedTurnCountAtCall))
+        : undefined;
+    if (!description || !toolCallId || rawTurnCountAtCall === undefined || projectedTurnCountAtCall === undefined) {
+        return undefined;
+    }
+    return {
+        description,
+        toolCallId,
+        rawTurnCountAtCall,
+        projectedTurnCountAtCall,
+    };
 }
 export function normalizeEntryMap(value) {
     if (!value || typeof value !== "object") {
@@ -104,10 +126,11 @@ export function normalizeScratchpadState(state, agentLabel) {
         ...(state?.entries ?? {}),
         ...(legacyNotes.length > 0 && state?.entries?.notes === undefined ? { notes: legacyNotes } : {}),
     });
+    const activeNotice = normalizeScratchpadUseNotice(state?.activeNotice);
     return {
         ...(entries ? { entries } : {}),
-        keepLastMessages: normalizeKeepLastMessages(state?.keepLastMessages),
-        keepLastMessagesAnchorToolCallId: normalizeAnchorToolCallId(state?.keepLastMessagesAnchorToolCallId),
+        preserveTurns: normalizePreserveTurns(state?.preserveTurns),
+        ...(activeNotice ? { activeNotice } : {}),
         omitToolCallIds: dedupeStrings(state?.omitToolCallIds ?? []),
         ...(typeof state?.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
         ...(state?.agentLabel || agentLabel ? { agentLabel: state?.agentLabel ?? agentLabel } : {}),

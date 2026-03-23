@@ -194,10 +194,11 @@ The runtime merges tools from all strategies and throws on tool-name collisions.
 
 The tool supports:
 
+- `description`: required one-line note describing what this scratchpad update is doing
 - `setEntries`: merge key/value entries into the scratchpad
 - `replaceEntries`: replace all key/value entries
 - `removeEntryKeys`: delete specific entries by key
-- `keepLastMessages`: trim older non-system messages relative to the moment `scratchpad(...)` runs while preserving the original task and future messages
+- `preserveTurns`: keep the first `N` and last `N` user/assistant turns from before this `scratchpad(...)` call, trimming only the middle and excluding tool use from the visible transcript
 - `omitToolCallIds`: remove completed tool exchanges after the important parts have been captured
 
 Entry names are intentionally unconstrained. Common choices are `objective`, `thesis`, `findings`, `notes`, `side-effects`, and `next-steps`, but the agent can use whatever keys match the task.

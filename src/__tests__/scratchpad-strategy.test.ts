@@ -1,9 +1,9 @@
-import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV3Message, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import { ScratchpadStrategy } from "../index.js";
 import { appendReminderToLatestUserMessage } from "../prompt-utils.js";
 import { InMemoryScratchpadStore, makePrompt } from "./helpers.js";
 
-function emitReminderToPrompt(state: { prompt: any; updatePrompt: (prompt: any) => void }, reminder: { content: string }) {
+function emitReminderToPrompt(state: { prompt: LanguageModelV3Prompt; updatePrompt: (prompt: LanguageModelV3Prompt) => void }, reminder: { content: string }) {
   state.updatePrompt(appendReminderToLatestUserMessage(state.prompt, reminder.content));
 }
 
@@ -18,17 +18,17 @@ function makeState(prompt: LanguageModelV3Prompt, pinnedIds: string[] = []) {
     prompt,
     params: { prompt, providerOptions: {} },
     pinnedToolCallIds,
-    removedToolExchanges: [] as any[],
-    updatePrompt(nextPrompt: any) {
+    removedToolExchanges: [] as Array<{ toolCallId: string; toolName: string; reason: string }>,
+    updatePrompt(nextPrompt: LanguageModelV3Prompt) {
       this.prompt = nextPrompt;
     },
-    updateParams(patch: any) {
+    updateParams(patch: Record<string, unknown>) {
       this.params = { ...this.params, ...patch };
-      if (patch.prompt) {
-        this.prompt = patch.prompt;
+      if ("prompt" in patch && patch.prompt) {
+        this.prompt = patch.prompt as LanguageModelV3Prompt;
       }
     },
-    addRemovedToolExchanges(exchanges: any[]) {
+    addRemovedToolExchanges(exchanges: Array<{ toolCallId: string; toolName: string; reason: string }>) {
       this.removedToolExchanges = [...this.removedToolExchanges, ...exchanges];
     },
     addPinnedToolCallIds(ids: string[]) {
@@ -43,150 +43,98 @@ function makeState(prompt: LanguageModelV3Prompt, pinnedIds: string[] = []) {
   return state;
 }
 
-function textOf(message: any): string | undefined {
-  if (message.role === "system") return message.content;
-  for (const part of message.content) {
-    if (part.type === "text") return part.text;
-    if (part.type === "tool-call") return `tool-call:${part.toolCallId}`;
-    if (part.type === "tool-result") return `tool-result:${part.toolCallId}`;
+function user(text: string): Extract<LanguageModelV3Message, { role: "user" }> {
+  return {
+    role: "user",
+    content: [{ type: "text", text }],
+  };
+}
+
+function assistantText(text: string): Extract<LanguageModelV3Message, { role: "assistant" }> {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+  };
+}
+
+function assistantToolCall(toolCallId: string, toolName = "search"): Extract<LanguageModelV3Message, { role: "assistant" }> {
+  return {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId, toolName, input: { q: toolCallId } }],
+  };
+}
+
+function assistantMixed(text: string, toolCallId: string, toolName = "search"): Extract<LanguageModelV3Message, { role: "assistant" }> {
+  return {
+    role: "assistant",
+    content: [
+      { type: "text", text },
+      { type: "tool-call", toolCallId, toolName, input: { q: toolCallId } },
+    ],
+  };
+}
+
+function toolResult(toolCallId: string, toolName = "search", value = "result"): Extract<LanguageModelV3Message, { role: "tool" }> {
+  return {
+    role: "tool",
+    content: [{ type: "tool-result", toolCallId, toolName, output: { type: "text", value } }],
+  };
+}
+
+function firstText(message: LanguageModelV3Message): string | undefined {
+  if (message.role === "system") {
+    return typeof message.content === "string" ? message.content : undefined;
   }
-  return undefined;
+
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+
+  return message.content.find((part) => part.type === "text")?.text;
 }
 
-/**
- * Build a 10-message (non-system) prompt for head-preserving trim testing.
- * Layout:
- *   0: system
- *   1: user "msg-1"       (original task)
- *   2: assistant "msg-2"  (first response)
- *   3: user "msg-3"
- *   4: assistant "msg-4"  <- tool-call "call-mid"
- *   5: tool               <- tool-result "call-mid"
- *   6: user "msg-6"
- *   7: assistant "msg-7"
- *   8: user "msg-8"
- *   9: assistant "msg-9"
- *  10: user "msg-10"
- *  11: assistant "msg-11"
- */
-function makeLargePrompt(): LanguageModelV3Prompt {
-  return [
-    { role: "system", content: "You are helpful." },
-    { role: "user", content: [{ type: "text", text: "msg-1" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-2" }] },
-    { role: "user", content: [{ type: "text", text: "msg-3" }] },
-    {
-      role: "assistant",
-      content: [{ type: "tool-call", toolCallId: "call-mid", toolName: "search", input: { q: "x" } }],
-    },
-    {
-      role: "tool",
-      content: [{ type: "tool-result", toolCallId: "call-mid", toolName: "search", output: { type: "text", value: "result" } }],
-    },
-    { role: "user", content: [{ type: "text", text: "msg-6" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-7" }] },
-    { role: "user", content: [{ type: "text", text: "msg-8" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-9" }] },
-    { role: "user", content: [{ type: "text", text: "msg-10" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-11" }] },
-  ];
+function visibleSequence(prompt: LanguageModelV3Prompt): string[] {
+  return prompt.flatMap((message) => {
+    const text = firstText(message);
+    return text === undefined ? [] : [`${message.role}:${text}`];
+  });
 }
 
-function makeAnchoredPrompt(): LanguageModelV3Prompt {
-  return [
-    { role: "system", content: "You are helpful." },
-    { role: "user", content: [{ type: "text", text: "msg-1" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-2" }] },
-    { role: "user", content: [{ type: "text", text: "msg-3" }] },
-    { role: "assistant", content: [{ type: "text", text: "msg-4" }] },
-    {
-      role: "assistant",
-      content: [{ type: "tool-call", toolCallId: "scratch-call-1", toolName: "scratchpad", input: { keepLastMessages: 1 } }],
-    },
-    {
-      role: "tool",
-      content: [{ type: "tool-result", toolCallId: "scratch-call-1", toolName: "scratchpad", output: { type: "json", value: { ok: true } } }],
-    },
-    { role: "assistant", content: [{ type: "text", text: "after-scratchpad" }] },
-    { role: "user", content: [{ type: "text", text: "future-1" }] },
-    { role: "assistant", content: [{ type: "text", text: "future-2" }] },
-    { role: "user", content: [{ type: "text", text: "future-3" }] },
-  ];
+function latestUserReminderText(prompt: LanguageModelV3Prompt): string {
+  const latestUserMessage = [...prompt].reverse().find((message) => message.role === "user");
+  if (!latestUserMessage || typeof latestUserMessage.content === "string") {
+    return "";
+  }
+
+  return latestUserMessage.content.at(-1)?.type === "text"
+    ? latestUserMessage.content.at(-1)?.text ?? ""
+    : "";
 }
 
 describe("ScratchpadStrategy", () => {
-  test("scratchpad tool updates only the caller state using experimental_context", async () => {
+  test("scratchpad tool persists preserveTurns and the active notice for the caller only", async () => {
     const store = new InMemoryScratchpadStore();
     const strategy = new ScratchpadStrategy({ scratchpadStore: store });
     const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
 
     const result = await scratchpadTool.execute?.(
       {
+        description: "Saving parser state",
         setEntries: {
           notes: "Focus on parser cleanup",
         },
-        keepLastMessages: 3,
+        preserveTurns: 2,
         omitToolCallIds: ["call-1"],
       },
       {
         toolCallId: "tool-call-1",
-        messages: [],
-        experimental_context: {
-          contextManagement: {
-            conversationId: "conv-1",
-            agentId: "agent-1",
-            agentLabel: "Alpha",
-          },
-        },
-      }
-    );
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: true,
-      })
-    );
-    expect(await store.get({ conversationId: "conv-1", agentId: "agent-1" })).toEqual(
-      expect.objectContaining({
-        entries: {
-          notes: "Focus on parser cleanup",
-        },
-        keepLastMessages: 3,
-        keepLastMessagesAnchorToolCallId: "tool-call-1",
-        omitToolCallIds: ["call-1"],
-      })
-    );
-    expect(await store.get({ conversationId: "conv-1", agentId: "agent-2" })).toBeUndefined();
-  });
-
-  test("scratchpad tool supports key/value entry updates without special note handling", async () => {
-    const store = new InMemoryScratchpadStore();
-    await store.set(
-      { conversationId: "conv-1", agentId: "agent-1" },
-      {
-        entries: {
-          notes: "Existing notes rewritten by the model",
-          objective: "Inspect the parser flow",
-          stale: "remove me",
-        },
-        omitToolCallIds: [],
-      }
-    );
-
-    const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-    const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
-
-    const result = await scratchpadTool.execute?.(
-      {
-        setEntries: {
-          findings: "Tool ordering still looks correct",
-          notes: "Fresh follow-up",
-        },
-        removeEntryKeys: ["stale"],
-      },
-      {
-        toolCallId: "tool-call-2",
-        messages: [],
+        messages: [
+          { role: "system", content: "You are helpful." },
+          user("1"),
+          assistantText("ok, 1"),
+          user("2"),
+          assistantText("ok, 2"),
+        ],
         experimental_context: {
           contextManagement: {
             conversationId: "conv-1",
@@ -201,12 +149,45 @@ describe("ScratchpadStrategy", () => {
     expect(await store.get({ conversationId: "conv-1", agentId: "agent-1" })).toEqual(
       expect.objectContaining({
         entries: {
-          findings: "Tool ordering still looks correct",
-          notes: "Fresh follow-up",
-          objective: "Inspect the parser flow",
+          notes: "Focus on parser cleanup",
         },
+        preserveTurns: 2,
+        activeNotice: {
+          description: "Saving parser state",
+          toolCallId: "tool-call-1",
+          rawTurnCountAtCall: 2,
+          projectedTurnCountAtCall: 2,
+        },
+        omitToolCallIds: ["call-1"],
       })
     );
+    expect(await store.get({ conversationId: "conv-1", agentId: "agent-2" })).toBeUndefined();
+  });
+
+  test("scratchpad tool requires description", async () => {
+    const store = new InMemoryScratchpadStore();
+    const strategy = new ScratchpadStrategy({ scratchpadStore: store });
+    const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
+
+    await expect(
+      scratchpadTool.execute?.(
+        {
+          setEntries: {
+            notes: "Missing description",
+          },
+        } as never,
+        {
+          toolCallId: "tool-call-1",
+          messages: [],
+          experimental_context: {
+            contextManagement: {
+              conversationId: "conv-1",
+              agentId: "agent-1",
+            },
+          },
+        }
+      )
+    ).rejects.toThrow();
   });
 
   test("applies explicit omissions and injects attributed reminders", async () => {
@@ -217,6 +198,12 @@ describe("ScratchpadStrategy", () => {
         entries: {
           notes: "Parser follow-up is still open.",
           objective: "Keep the working set tight.",
+        },
+        activeNotice: {
+          description: "Saving parser state",
+          toolCallId: "scratchpad-call-1",
+          rawTurnCountAtCall: 2,
+          projectedTurnCountAtCall: 2,
         },
         omitToolCallIds: ["call-old", "call-older"],
       }
@@ -237,81 +224,229 @@ describe("ScratchpadStrategy", () => {
     });
     const prompt = [
       ...makePrompt(),
-      {
-        role: "assistant" as const,
-        content: [{ type: "tool-call" as const, toolCallId: "call-older", toolName: "shell", input: { command: "git status" } }],
-      },
-      {
-        role: "tool" as const,
-        content: [{ type: "tool-result" as const, toolCallId: "call-older", toolName: "shell", output: { type: "text" as const, value: "clean" } }],
-      },
+      assistantToolCall("call-older", "shell"),
+      toolResult("call-older", "shell", "clean"),
     ];
     const state = makeState(prompt);
 
-    const result = await strategy.apply(state as any);
+    const result = await strategy.apply(state as never);
 
+    expect(state.prompt.some((message) => message.role === "tool")).toBe(false);
     expect(
-      state.prompt.some((message: any) =>
-        message.content?.some?.((part: any) =>
-          (part.type === "tool-call" || part.type === "tool-result") && part.toolCallId === "call-old"
-        )
-      )
-    ).toBe(false);
-    expect(
-      state.prompt.some((message: any) =>
-        message.content?.some?.((part: any) =>
-          (part.type === "tool-call" || part.type === "tool-result") && part.toolCallId === "call-older"
-        )
+      state.prompt.some((message) =>
+        message.role === "assistant"
+        && message.content.some((part) => part.type === "tool-call" || part.type === "tool-result")
       )
     ).toBe(false);
 
-    const latestUserMessage = [...state.prompt].reverse().find((message: any) => message.role === "user");
-    const reminderText = latestUserMessage?.content.at(-1)?.text ?? "";
-
+    const reminderText = latestUserReminderText(state.prompt);
     expect(reminderText).toContain("Your scratchpad (Alpha)");
     expect(reminderText).toContain("objective: Keep the working set tight.");
     expect(reminderText).toContain("notes: Parser follow-up is still open.");
     expect(reminderText).toContain("Other agent scratchpads:");
     expect(reminderText).toContain("- Beta:");
     expect(reminderText).toContain("findings: I already inspected the CLI wiring.");
-    expect(reminderText).not.toContain("Removed tool exchanges:");
     expect(reminderText).toContain("Use scratchpad(...) proactively to keep this working state current.");
-    expect(reminderText).not.toContain("Use scratchpad(...) now");
     expect(result).toEqual({
       reason: "scratchpad-rendered",
       payloads: expect.objectContaining({
         entryCount: 2,
         appliedOmitCount: 2,
         reminderTone: "informational",
+        activeNoticeDescription: "Saving parser state",
       }),
     });
   });
 
-  test("keepLastMessages only shrinks the current prompt", async () => {
+  test("projects semantic head and tail turns, pairing assistant text across intervening tool messages", async () => {
     const store = new InMemoryScratchpadStore();
     await store.set(
       { conversationId: "conv-1", agentId: "agent-1" },
       {
-        keepLastMessages: 10,
+        preserveTurns: 1,
+        activeNotice: {
+          description: "Compacting earlier work",
+          toolCallId: "scratchpad-call-1",
+          rawTurnCountAtCall: 4,
+          projectedTurnCountAtCall: 2,
+        },
         omitToolCallIds: [],
       }
     );
 
     const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-    const alreadySmallPrompt = makePrompt().slice(-2);
-    const state = makeState(alreadySmallPrompt);
+    const state = makeState([
+      { role: "system", content: "You are helpful." },
+      user("1"),
+      assistantText("ok, 1"),
+      user("2"),
+      assistantToolCall("call-2"),
+      toolResult("call-2"),
+      assistantText("ok, 2"),
+      user("3"),
+      assistantMixed("ok, 3", "call-3"),
+      toolResult("call-3"),
+      user("4"),
+      assistantText("ok, 4"),
+    ]);
 
-    await strategy.apply(state as any);
+    await strategy.apply(state as never);
 
-    expect(state.prompt.filter((message: any) => message.role !== "system")).toHaveLength(2);
+    expect(visibleSequence(state.prompt)).toEqual([
+      "system:You are helpful.",
+      "user:1",
+      "assistant:ok, 1",
+      "assistant:<system-reminder>[scratchpad used: Compacting earlier work]</system-reminder>",
+      "user:4",
+      "assistant:ok, 4",
+    ]);
+    expect(state.prompt.some((message) => message.role === "tool")).toBe(false);
+    expect(
+      state.prompt.some((message) =>
+        message.role === "assistant"
+        && message.content.some((part) => part.type === "tool-call" || part.type === "tool-result")
+      )
+    ).toBe(false);
   });
 
-  test("pinned tool exchanges are preserved against scratchpad omission and trimming", async () => {
+  test("preserves future turns after an earlier scratchpad compaction", async () => {
     const store = new InMemoryScratchpadStore();
     await store.set(
       { conversationId: "conv-1", agentId: "agent-1" },
       {
-        keepLastMessages: 0,
+        preserveTurns: 1,
+        activeNotice: {
+          description: "Saved working state",
+          toolCallId: "scratchpad-call-1",
+          rawTurnCountAtCall: 4,
+          projectedTurnCountAtCall: 2,
+        },
+        omitToolCallIds: [],
+      }
+    );
+
+    const strategy = new ScratchpadStrategy({ scratchpadStore: store });
+    const state = makeState([
+      { role: "system", content: "You are helpful." },
+      user("1"),
+      assistantText("ok, 1"),
+      user("2"),
+      assistantText("ok, 2"),
+      user("3"),
+      assistantText("ok, 3"),
+      user("4"),
+      assistantText("ok, 4"),
+      user("5"),
+      assistantText("ok, 5"),
+      user("6"),
+      assistantText("ok, 6"),
+    ]);
+
+    await strategy.apply(state as never);
+
+    expect(visibleSequence(state.prompt)).toEqual([
+      "system:You are helpful.",
+      "user:1",
+      "assistant:ok, 1",
+      "assistant:<system-reminder>[scratchpad used: Saved working state]</system-reminder>",
+      "user:4",
+      "assistant:ok, 4",
+      "user:5",
+      "assistant:ok, 5",
+      "user:6",
+      "assistant:ok, 6",
+    ]);
+  });
+
+  test("a newer scratchpad call replaces the older visible notice", async () => {
+    const store = new InMemoryScratchpadStore();
+    await store.set(
+      { conversationId: "conv-1", agentId: "agent-1" },
+      {
+        preserveTurns: 1,
+        activeNotice: {
+          description: "Fresher scratchpad state",
+          toolCallId: "scratchpad-call-2",
+          rawTurnCountAtCall: 6,
+          projectedTurnCountAtCall: 2,
+        },
+        omitToolCallIds: [],
+      }
+    );
+
+    const strategy = new ScratchpadStrategy({ scratchpadStore: store });
+    const state = makeState([
+      { role: "system", content: "You are helpful." },
+      user("1"),
+      assistantText("ok, 1"),
+      assistantText("<system-reminder>[scratchpad used: stale]</system-reminder>"),
+      user("4"),
+      assistantText("ok, 4"),
+      user("5"),
+      assistantText("ok, 5"),
+      user("6"),
+      assistantText("ok, 6"),
+    ]);
+
+    await strategy.apply(state as never);
+
+    expect(visibleSequence(state.prompt)).toEqual([
+      "system:You are helpful.",
+      "user:1",
+      "assistant:ok, 1",
+      "assistant:<system-reminder>[scratchpad used: Fresher scratchpad state]</system-reminder>",
+      "user:6",
+      "assistant:ok, 6",
+    ]);
+    expect(JSON.stringify(state.prompt)).not.toContain("[scratchpad used: stale]");
+  });
+
+  test("preserves the newest unmatched user request even when preserveTurns is zero", async () => {
+    const store = new InMemoryScratchpadStore();
+    await store.set(
+      { conversationId: "conv-1", agentId: "agent-1" },
+      {
+        preserveTurns: 0,
+        activeNotice: {
+          description: "Dropping answered turns",
+          toolCallId: "scratchpad-call-1",
+          rawTurnCountAtCall: 3,
+          projectedTurnCountAtCall: 1,
+        },
+        omitToolCallIds: [],
+      }
+    );
+
+    const strategy = new ScratchpadStrategy({ scratchpadStore: store });
+    const state = makeState([
+      { role: "system", content: "You are helpful." },
+      user("1"),
+      assistantText("ok, 1"),
+      user("2"),
+      assistantText("ok, 2"),
+      user("3"),
+    ]);
+
+    await strategy.apply(state as never);
+
+    expect(visibleSequence(state.prompt)).toEqual([
+      "system:You are helpful.",
+      "assistant:<system-reminder>[scratchpad used: Dropping answered turns]</system-reminder>",
+      "user:3",
+    ]);
+  });
+
+  test("pinned tool exchanges are not counted as omitted even though tool use is hidden by turn projection", async () => {
+    const store = new InMemoryScratchpadStore();
+    await store.set(
+      { conversationId: "conv-1", agentId: "agent-1" },
+      {
+        activeNotice: {
+          description: "Saving state",
+          toolCallId: "scratchpad-call-1",
+          rawTurnCountAtCall: 2,
+          projectedTurnCountAtCall: 2,
+        },
         omitToolCallIds: ["call-old"],
       }
     );
@@ -319,43 +454,18 @@ describe("ScratchpadStrategy", () => {
     const strategy = new ScratchpadStrategy({ scratchpadStore: store });
     const state = makeState(makePrompt(), ["call-old"]);
 
-    await strategy.apply(state as any);
+    await strategy.apply(state as never);
 
-    expect(
-      state.prompt.some((message: any) =>
-        message.content?.some?.((part: any) =>
-          (part.type === "tool-call" || part.type === "tool-result") && part.toolCallId === "call-old"
-        )
-      )
-    ).toBe(true);
+    expect(state.removedToolExchanges.map((exchange) => exchange.toolCallId)).not.toContain("call-old");
+    expect(state.prompt.some((message) => message.role === "tool")).toBe(false);
   });
 
   test("forces scratchpad tool choice once the configured threshold is crossed", async () => {
     const store = new InMemoryScratchpadStore();
     const prompt = [
       ...makePrompt(),
-      {
-        role: "assistant" as const,
-        content: [
-          {
-            type: "tool-call" as const,
-            toolCallId: "call-new",
-            toolName: "fs_read",
-            input: { path: "new.ts" },
-          },
-        ],
-      },
-      {
-        role: "tool" as const,
-        content: [
-          {
-            type: "tool-result" as const,
-            toolCallId: "call-new",
-            toolName: "fs_read",
-            output: { type: "text" as const, value: "x".repeat(800) },
-          },
-        ],
-      },
+      assistantToolCall("call-new", "fs_read"),
+      toolResult("call-new", "fs_read", "x".repeat(800)),
     ];
     const strategy = new ScratchpadStrategy({
       scratchpadStore: store,
@@ -368,7 +478,7 @@ describe("ScratchpadStrategy", () => {
     });
     const state = makeState(prompt);
 
-    const result = await strategy.apply(state as any);
+    const result = await strategy.apply(state as never);
 
     expect(state.params.toolChoice).toEqual({
       type: "tool",
@@ -389,37 +499,31 @@ describe("ScratchpadStrategy", () => {
 
   test("does not immediately re-force scratchpad after a scratchpad call/result", async () => {
     const store = new InMemoryScratchpadStore();
-    const prompt = [
+    const prompt: LanguageModelV3Prompt = [
+      { role: "system", content: "You are helpful." },
       {
-        role: "system" as const,
-        content: "You are helpful.",
-      },
-      {
-        role: "assistant" as const,
+        role: "assistant",
         content: [
           {
-            type: "tool-call" as const,
+            type: "tool-call",
             toolCallId: "scratch-call-1",
             toolName: "scratchpad",
-            input: { setEntries: { notes: "keep parser state" } },
+            input: { description: "Saving notes", setEntries: { notes: "keep parser state" } },
           },
         ],
       },
       {
-        role: "tool" as const,
+        role: "tool",
         content: [
           {
-            type: "tool-result" as const,
+            type: "tool-result",
             toolCallId: "scratch-call-1",
             toolName: "scratchpad",
-            output: { type: "json" as const, value: { ok: true } },
+            output: { type: "json", value: { ok: true } },
           },
         ],
       },
-      {
-        role: "user" as const,
-        content: [{ type: "text" as const, text: "Continue." }],
-      },
+      user("Continue."),
     ];
     const strategy = new ScratchpadStrategy({
       scratchpadStore: store,
@@ -432,7 +536,7 @@ describe("ScratchpadStrategy", () => {
     });
     const state = makeState(prompt);
 
-    const result = await strategy.apply(state as any);
+    const result = await strategy.apply(state as never);
 
     expect(state.params.toolChoice).toBeUndefined();
     expect(result).toEqual(
@@ -444,96 +548,6 @@ describe("ScratchpadStrategy", () => {
         }),
       })
     );
-  });
-
-  describe("head-preserving trimming", () => {
-    test("keepLastMessages anchors trimming at the scratchpad call and preserves future messages", async () => {
-      const store = new InMemoryScratchpadStore();
-      await store.set(
-        { conversationId: "conv-1", agentId: "agent-1" },
-        {
-          entries: {
-            notes: "working on poems",
-          },
-          keepLastMessages: 1,
-          keepLastMessagesAnchorToolCallId: "scratch-call-1",
-          omitToolCallIds: [],
-        }
-      );
-
-      const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const prompt = makeAnchoredPrompt();
-      const state = makeState(prompt);
-
-      await strategy.apply(state as any);
-
-      const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
-
-      expect(texts).toContain("msg-1");
-      expect(texts).toContain("msg-2");
-      expect(texts).toContain("msg-4");
-      expect(texts).toContain("tool-call:scratch-call-1");
-      expect(texts).toContain("tool-result:scratch-call-1");
-      expect(texts).toContain("after-scratchpad");
-      expect(texts).toContain("future-1");
-      expect(texts).toContain("future-2");
-      expect(texts).toContain("future-3");
-      expect(texts).toContain("You are helpful.");
-      expect(texts).not.toContain("msg-3");
-    });
-
-    test("keepLastMessages=0 still preserves everything after the scratchpad call", async () => {
-      const store = new InMemoryScratchpadStore();
-      await store.set(
-        { conversationId: "conv-1", agentId: "agent-1" },
-        {
-          keepLastMessages: 0,
-          keepLastMessagesAnchorToolCallId: "scratch-call-1",
-          omitToolCallIds: [],
-        }
-      );
-
-      const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const prompt = makeAnchoredPrompt();
-      const state = makeState(prompt);
-
-      await strategy.apply(state as any);
-
-      const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
-
-      expect(texts).toContain("msg-1");
-      expect(texts).toContain("msg-2");
-      expect(texts).toContain("tool-call:scratch-call-1");
-      expect(texts).toContain("tool-result:scratch-call-1");
-      expect(texts).toContain("future-3");
-      expect(texts).not.toContain("msg-3");
-      expect(texts).not.toContain("msg-4");
-    });
-
-    test("falls back to the latest scratchpad tool call when anchor is missing from stored state", async () => {
-      const store = new InMemoryScratchpadStore();
-      await store.set(
-        { conversationId: "conv-1", agentId: "agent-1" },
-        {
-          keepLastMessages: 1,
-          omitToolCallIds: [],
-        }
-      );
-
-      const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const prompt = makeAnchoredPrompt();
-      const state = makeState(prompt);
-
-      await strategy.apply(state as any);
-
-      const texts = state.prompt.map(textOf).filter((t) => t !== undefined);
-
-      expect(texts).toContain("msg-1");
-      expect(texts).toContain("msg-2");
-      expect(texts).toContain("msg-4");
-      expect(texts).toContain("future-3");
-      expect(texts).not.toContain("msg-3");
-    });
   });
 
   describe("forced scratchpad error", () => {
@@ -549,21 +563,28 @@ describe("ScratchpadStrategy", () => {
         },
       });
 
-      // First, apply to trigger the force
-      const prompt = makeLargePrompt();
-      const state = makeState(prompt);
-      await strategy.apply(state as any);
+      const state = makeState([
+        { role: "system", content: "You are helpful." },
+        user("1"),
+        assistantText("ok, 1"),
+        user("2"),
+        assistantText("ok, 2"),
+        user("3"),
+        assistantText("ok, 3"),
+        user("4"),
+        assistantText("ok, 4"),
+      ]);
+      await strategy.apply(state as never);
 
-      // Verify force was triggered
       expect(state.params.toolChoice).toEqual({
         type: "tool",
         toolName: "scratchpad",
       });
 
-      // Now call the tool with scratchpad entries only (no pruning params)
       const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
       const result = await scratchpadTool.execute?.(
         {
+          description: "Saving only notes",
           setEntries: {
             notes: "I saved my progress but didn't prune",
           },
@@ -582,8 +603,7 @@ describe("ScratchpadStrategy", () => {
 
       expect(result.ok).toBe(false);
       expect(result.error).toContain("Context is critically full");
-      expect(result.error).toContain("keepLastMessages");
-      // Scratchpad updates should still be saved in the store
+      expect(result.error).toContain("preserveTurns");
       const saved = await store.get({ conversationId: "conv-1", agentId: "agent-1" });
       expect(saved).toEqual(
         expect.objectContaining({
@@ -594,7 +614,7 @@ describe("ScratchpadStrategy", () => {
       );
     });
 
-    test("returns ok when forced and agent provides keepLastMessages", async () => {
+    test("returns ok when forced and agent provides preserveTurns", async () => {
       const store = new InMemoryScratchpadStore();
       const strategy = new ScratchpadStrategy({
         scratchpadStore: store,
@@ -606,19 +626,27 @@ describe("ScratchpadStrategy", () => {
         },
       });
 
-      // Trigger the force
-      const prompt = makeLargePrompt();
-      const state = makeState(prompt);
-      await strategy.apply(state as any);
+      const state = makeState([
+        { role: "system", content: "You are helpful." },
+        user("1"),
+        assistantText("ok, 1"),
+        user("2"),
+        assistantText("ok, 2"),
+        user("3"),
+        assistantText("ok, 3"),
+        user("4"),
+        assistantText("ok, 4"),
+      ]);
+      await strategy.apply(state as never);
 
-      // Call the tool with keepLastMessages
       const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
       const result = await scratchpadTool.execute?.(
         {
+          description: "Compacting older turns",
           setEntries: {
             notes: "Saved progress",
           },
-          keepLastMessages: 5,
+          preserveTurns: 2,
         },
         {
           toolCallId: "tool-call-forced",
@@ -633,82 +661,14 @@ describe("ScratchpadStrategy", () => {
       );
 
       expect(result.ok).toBe(true);
-      const saved = await store.get({ conversationId: "conv-1", agentId: "agent-1" });
-      expect(saved).toEqual(
+      expect(await store.get({ conversationId: "conv-1", agentId: "agent-1" })).toEqual(
         expect.objectContaining({
           entries: {
             notes: "Saved progress",
           },
-          keepLastMessages: 5,
+          preserveTurns: 2,
         })
       );
-    });
-
-    test("returns ok when forced and agent provides omitToolCallIds", async () => {
-      const store = new InMemoryScratchpadStore();
-      const strategy = new ScratchpadStrategy({
-        scratchpadStore: store,
-        workingTokenBudget: 100,
-        forceToolThresholdRatio: 0.7,
-        estimator: {
-          estimateMessage: () => 10,
-          estimatePrompt: () => 80,
-        },
-      });
-
-      // Trigger the force
-      const prompt = makeLargePrompt();
-      const state = makeState(prompt);
-      await strategy.apply(state as any);
-
-      // Call the tool with omitToolCallIds
-      const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
-      const result = await scratchpadTool.execute?.(
-        {
-          setEntries: {
-            notes: "Saved progress",
-          },
-          omitToolCallIds: ["call-mid"],
-        },
-        {
-          toolCallId: "tool-call-forced",
-          messages: [],
-          experimental_context: {
-            contextManagement: {
-              conversationId: "conv-1",
-              agentId: "agent-1",
-            },
-          },
-        }
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
-    test("does not error on non-forced calls without pruning params", async () => {
-      const store = new InMemoryScratchpadStore();
-      const strategy = new ScratchpadStrategy({ scratchpadStore: store });
-      const scratchpadTool = strategy.getOptionalTools?.().scratchpad;
-
-      const result = await scratchpadTool.execute?.(
-        {
-          setEntries: {
-            notes: "Just saving notes",
-          },
-        },
-        {
-          toolCallId: "tool-call-1",
-          messages: [],
-          experimental_context: {
-            contextManagement: {
-              conversationId: "conv-1",
-              agentId: "agent-1",
-            },
-          },
-        }
-      );
-
-      expect(result.ok).toBe(true);
     });
   });
 
@@ -724,42 +684,25 @@ describe("ScratchpadStrategy", () => {
           estimatePrompt: () => 80,
         },
       });
-      const prompt = makeLargePrompt();
-      const state = makeState(prompt);
+      const state = makeState([
+        { role: "system", content: "You are helpful." },
+        user("1"),
+        assistantText("ok, 1"),
+        user("2"),
+        assistantText("ok, 2"),
+        user("3"),
+        assistantText("ok, 3"),
+        user("4"),
+        assistantText("ok, 4"),
+      ]);
 
-      await strategy.apply(state as any);
+      await strategy.apply(state as never);
 
-      const latestUserMessage = [...state.prompt].reverse().find((message: any) => message.role === "user");
-      const reminderText = latestUserMessage?.content.at(-1)?.text ?? "";
-
+      const reminderText = latestUserReminderText(state.prompt);
       expect(reminderText).toContain("CRITICAL: Context is nearly full");
       expect(reminderText).toContain("Record side-effect actions in your scratchpad");
-      expect(reminderText).toContain("Set keepLastMessages to trim old messages");
+      expect(reminderText).toContain("Set preserveTurns to compact older turns");
       expect(reminderText).toContain("Failure to free context will result in an error");
-    });
-
-    test("does not include CRITICAL guidance when force is not triggered", async () => {
-      const store = new InMemoryScratchpadStore();
-      const strategy = new ScratchpadStrategy({
-        scratchpadStore: store,
-        workingTokenBudget: 100,
-        forceToolThresholdRatio: 0.7,
-        estimator: {
-          estimateMessage: () => 10,
-          estimatePrompt: () => 50, // Below threshold
-        },
-      });
-      const prompt = makeLargePrompt();
-      const state = makeState(prompt);
-
-      await strategy.apply(state as any);
-
-      const latestUserMessage = [...state.prompt].reverse().find((message: any) => message.role === "user");
-      const reminderText = latestUserMessage?.content.at(-1)?.text ?? "";
-
-      expect(reminderText).not.toContain("CRITICAL");
-      expect(reminderText).toContain("Suggested entry names for this run");
-      expect(reminderText).toContain("Use scratchpad(...) proactively");
     });
   });
 });

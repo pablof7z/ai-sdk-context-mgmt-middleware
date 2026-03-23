@@ -16,7 +16,8 @@ This is the strategy to use when you want the agent to actively manage its own c
 ## What Changes In The Prompt
 
 - tool exchanges listed in `omitToolCallIds` are removed
-- older non-system messages can be trimmed with `keepLastMessages` anchored to the moment `scratchpad(...)` runs
+- older transcript context can be compacted with `preserveTurns`, keeping only head/tail user-assistant turns from before the latest scratchpad use
+- a visible assistant notice records the latest scratchpad use in chronological order
 - a reminder block is appended to the latest user message
 - that reminder can include this agent's scratchpad entries and other agents' scratchpads
 
@@ -25,7 +26,8 @@ This is the strategy to use when you want the agent to actively manage its own c
 On each turn, the strategy reads the persisted scratchpad state for the current agent and conversation. It can then:
 
 - hide old tool exchanges the agent previously marked as safe to omit
-- shrink the visible transcript while still preserving the conversation start and recent tail
+- re-project the visible transcript as user turns plus assistant text replies, excluding tool use
+- compact the pre-scratchpad history by keeping only the first and last preserved turns
 - inject the agent's current working state back into the prompt as a reminder block
 
 The key idea is that the scratchpad is not a chronological log. It is a living state snapshot that the model keeps rewriting as the task evolves.
@@ -43,10 +45,11 @@ The transcript is noisy but complete. The scratchpad is compact but curated. The
 
 The optional `scratchpad(...)` tool accepts:
 
+- `description`: required one-line explanation of what this scratchpad update is doing
 - `setEntries`: merge key/value entries into the scratchpad
 - `replaceEntries`: replace the entire key/value map
 - `removeEntryKeys`: delete specific keys
-- `keepLastMessages`: trim older non-system messages from before this `scratchpad(...)` call while preserving the original task and all future messages
+- `preserveTurns`: keep the first `N` and last `N` semantic turns from before this `scratchpad(...)` call while trimming only the middle
 - `omitToolCallIds`: remove completed tool exchanges after their important parts are captured
 
 Entry names are intentionally open-ended. Agents can use any keys that fit the task, instead of being forced into a fixed schema.
@@ -65,7 +68,7 @@ Entry names are intentionally open-ended. Agents can use any keys that fit the t
 - rewrite stale entries instead of appending forever
 - move important facts out of raw tool output and into entries
 - once an insight is captured, omit the stale tool exchange from active context
-- use `keepLastMessages` when the scratchpad is good enough that the model no longer needs the full middle of the transcript before the current pruning point
+- use `preserveTurns` when the scratchpad is good enough that the model only needs the head and tail turns around the current pruning point
 
 ## When To Reach For It
 

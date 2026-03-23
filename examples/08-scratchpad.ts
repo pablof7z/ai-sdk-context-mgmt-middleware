@@ -55,14 +55,23 @@ async function main() {
     ) => Promise<unknown>;
   }).execute(
     {
+      description: "Capture parser findings and drop stale file reads",
       setEntries: {
         finding: "Parser edge case is around trailing commas.",
         nextStep: "Re-check trailing comma handling in parser.ts.",
         notes: "Reviewer: old shell output is no longer needed.",
       },
+      preserveTurns: 1,
       omitToolCallIds: ["call-old"],
     },
-    { experimental_context: DEMO_CONTEXT }
+    {
+      toolCallId: "scratchpad-demo-call-1",
+      messages: [
+        { role: "system", content: "You are a code review agent." },
+        { role: "user", content: "Continue the parser review." },
+      ],
+      experimental_context: DEMO_CONTEXT,
+    }
   );
 
   const capturedPrompts: LanguageModelV3Prompt[] = [];

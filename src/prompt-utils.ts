@@ -11,6 +11,7 @@ import type {
   ContextManagementRequestContext,
   PromptTokenEstimator,
   RemovedToolExchange,
+  ScratchpadUseNotice,
 } from "./types.js";
 
 export interface ToolExchange {
@@ -19,6 +20,16 @@ export interface ToolExchange {
   callMessageIndex?: number;
   resultMessageIndices: number[];
 }
+
+type PromptLikeMessage = {
+  role: string;
+  content: unknown;
+};
+
+type ScratchpadSemanticTurn = {
+  user: Extract<LanguageModelV3Message, { role: "user" }>;
+  assistant?: Extract<LanguageModelV3Message, { role: "assistant" }>;
+};
 
 function cloneUnknown<T>(value: T): T {
   if (value === undefined || value === null) {
@@ -121,6 +132,241 @@ function isToolResultPart(part: unknown): part is LanguageModelV3ToolResultPart 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isTextPart(part: unknown): part is { type: "text"; text: string; providerOptions?: unknown } {
+  return isRecord(part) && part.type === "text" && typeof part.text === "string";
+}
+
+function getTextParts(content: unknown): Array<{ type: "text"; text: string; providerOptions?: unknown }> {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ type: "text", text: content }] : [];
+  }
+
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  return content
+    .filter(isTextPart)
+    .map((part) => ({
+      type: "text" as const,
+      text: part.text,
+      providerOptions: cloneUnknown(part.providerOptions),
+    }));
+}
+
+function hasTextContent(message: PromptLikeMessage): boolean {
+  return getTextParts(message.content).length > 0;
+}
+
+function isScratchpadUseNoticeText(text: string): boolean {
+  return text.startsWith("<system-reminder>[scratchpad used: ")
+    && text.endsWith("]</system-reminder>");
+}
+
+function isScratchpadUseNoticeMessage(message: PromptLikeMessage): boolean {
+  if (message.role !== "assistant") {
+    return false;
+  }
+
+  if (Array.isArray(message.content) && message.content.some((part) => !isTextPart(part))) {
+    return false;
+  }
+
+  const textParts = getTextParts(message.content);
+  return textParts.length === 1 && isScratchpadUseNoticeText(textParts[0].text);
+}
+
+function cloneAssistantTextMessage(
+  message: Extract<LanguageModelV3Message, { role: "assistant" }>
+): Extract<LanguageModelV3Message, { role: "assistant" }> | undefined {
+  const cloned = cloneMessage(message);
+  if (cloned.role !== "assistant") {
+    return undefined;
+  }
+
+  const textParts = cloned.content.filter((part) => part.type === "text");
+  if (textParts.length === 0) {
+    return undefined;
+  }
+
+  return {
+    ...cloned,
+    content: textParts,
+  };
+}
+
+function extractScratchpadSemanticTurns(prompt: LanguageModelV3Prompt): ScratchpadSemanticTurn[] {
+  const turns: ScratchpadSemanticTurn[] = [];
+  let openTurn: ScratchpadSemanticTurn | undefined;
+
+  for (const message of prompt) {
+    if (message.role === "system" || isScratchpadUseNoticeMessage(message)) {
+      continue;
+    }
+
+    if (message.role === "user") {
+      if (openTurn) {
+        turns.push(openTurn);
+      }
+      openTurn = {
+        user: cloneMessage(message) as Extract<LanguageModelV3Message, { role: "user" }>,
+      };
+      continue;
+    }
+
+    if (message.role === "assistant" && openTurn) {
+      const assistant = cloneAssistantTextMessage(message);
+      if (assistant) {
+        openTurn.assistant = assistant;
+        turns.push(openTurn);
+        openTurn = undefined;
+      }
+    }
+  }
+
+  if (openTurn) {
+    turns.push(openTurn);
+  }
+
+  return turns;
+}
+
+function flattenScratchpadTurns(turns: readonly ScratchpadSemanticTurn[]): LanguageModelV3Prompt {
+  const prompt: LanguageModelV3Prompt = [];
+
+  for (const turn of turns) {
+    prompt.push(turn.user);
+    if (turn.assistant) {
+      prompt.push(turn.assistant);
+    }
+  }
+
+  return prompt;
+}
+
+function getUnmatchedTurnTail(
+  turns: readonly ScratchpadSemanticTurn[]
+): ScratchpadSemanticTurn[] {
+  const latestTurn = turns.at(-1);
+  return latestTurn && latestTurn.assistant === undefined ? [latestTurn] : [];
+}
+
+export function buildScratchpadUseNoticeText(description: string): string {
+  return `<system-reminder>[scratchpad used: ${description}]</system-reminder>`;
+}
+
+export function buildScratchpadUseNoticeMessage(description: string): LanguageModelV3Message {
+  return {
+    role: "assistant",
+    content: [
+      {
+        type: "text",
+        text: buildScratchpadUseNoticeText(description),
+      },
+    ],
+  };
+}
+
+function inspectScratchpadSemanticTurns(messages: readonly PromptLikeMessage[]): {
+  turnCount: number;
+  latestTurnHasAssistant: boolean;
+} {
+  let openTurnCount = 0;
+  let turnCount = 0;
+  let latestTurnHasAssistant = false;
+
+  for (const message of messages) {
+    if (message.role === "system" || isScratchpadUseNoticeMessage(message)) {
+      continue;
+    }
+
+    if (message.role === "user") {
+      turnCount += 1;
+      openTurnCount = 1;
+      latestTurnHasAssistant = false;
+      continue;
+    }
+
+    if (message.role === "assistant" && openTurnCount > 0 && hasTextContent(message)) {
+      openTurnCount = 0;
+      latestTurnHasAssistant = true;
+    }
+  }
+
+  return {
+    turnCount,
+    latestTurnHasAssistant,
+  };
+}
+
+export function countScratchpadSemanticTurns(messages: readonly PromptLikeMessage[]): number {
+  return inspectScratchpadSemanticTurns(messages).turnCount;
+}
+
+export function countProjectedScratchpadTurns(
+  messages: readonly PromptLikeMessage[],
+  preserveTurns?: number | null
+): number {
+  const { turnCount, latestTurnHasAssistant } = inspectScratchpadSemanticTurns(messages);
+  const normalizedPreserveTurns = typeof preserveTurns === "number" && Number.isFinite(preserveTurns)
+    ? Math.max(0, Math.floor(preserveTurns))
+    : undefined;
+
+  if (normalizedPreserveTurns === undefined) {
+    return turnCount;
+  }
+
+  if (normalizedPreserveTurns === 0) {
+    return turnCount > 0 && !latestTurnHasAssistant ? 1 : 0;
+  }
+
+  return turnCount <= normalizedPreserveTurns * 2
+    ? turnCount
+    : normalizedPreserveTurns * 2;
+}
+
+export function projectScratchpadPrompt(
+  prompt: LanguageModelV3Prompt,
+  options: {
+    preserveTurns?: number | null;
+    notice?: ScratchpadUseNotice;
+  }
+): LanguageModelV3Prompt {
+  const systemMessages = prompt
+    .filter((message) => message.role === "system")
+    .map((message) => cloneMessage(message));
+  const turns = extractScratchpadSemanticTurns(prompt);
+  const preTurnCount = options.notice
+    ? Math.min(Math.max(0, Math.floor(options.notice.rawTurnCountAtCall)), turns.length)
+    : turns.length;
+  const preTurns = turns.slice(0, preTurnCount);
+  const futureTurns = turns.slice(preTurnCount);
+  const normalizedPreserveTurns = typeof options.preserveTurns === "number" && Number.isFinite(options.preserveTurns)
+    ? Math.max(0, Math.floor(options.preserveTurns))
+    : undefined;
+
+  let preservedHeadTurns = preTurns;
+  let preservedTailTurns: ScratchpadSemanticTurn[] = [];
+
+  if (normalizedPreserveTurns !== undefined) {
+    if (normalizedPreserveTurns === 0) {
+      preservedHeadTurns = [];
+      preservedTailTurns = getUnmatchedTurnTail(preTurns);
+    } else if (preTurns.length > normalizedPreserveTurns * 2) {
+      preservedHeadTurns = preTurns.slice(0, normalizedPreserveTurns);
+      preservedTailTurns = preTurns.slice(preTurns.length - normalizedPreserveTurns);
+    }
+  }
+
+  return [
+    ...systemMessages,
+    ...flattenScratchpadTurns(preservedHeadTurns),
+    ...(options.notice ? [buildScratchpadUseNoticeMessage(options.notice.description)] : []),
+    ...flattenScratchpadTurns(preservedTailTurns),
+    ...flattenScratchpadTurns(futureTurns),
+  ];
 }
 
 export function isContextManagementSystemMessage(message: LanguageModelV3Message): boolean {

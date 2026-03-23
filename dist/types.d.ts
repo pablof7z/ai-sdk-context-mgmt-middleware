@@ -232,11 +232,17 @@ export interface ScratchpadStoreKey {
 }
 export interface ScratchpadState {
     entries?: Record<string, string>;
-    keepLastMessages?: number | null;
-    keepLastMessagesAnchorToolCallId?: string | null;
+    preserveTurns?: number | null;
+    activeNotice?: ScratchpadUseNotice;
     omitToolCallIds: string[];
     updatedAt?: number;
     agentLabel?: string;
+}
+export interface ScratchpadUseNotice {
+    description: string;
+    toolCallId: string;
+    rawTurnCountAtCall: number;
+    projectedTurnCountAtCall: number;
 }
 export interface ScratchpadConversationEntry {
     agentId: string;
@@ -253,14 +259,14 @@ export interface ScratchpadStrategyOptions {
     reminderTone?: "informational" | "urgent" | "silent";
     workingTokenBudget?: number;
     forceToolThresholdRatio?: number;
-    preserveHeadCount?: number;
     estimator?: PromptTokenEstimator;
 }
 export interface ScratchpadToolInput {
+    description: string;
     setEntries?: Record<string, string>;
     replaceEntries?: Record<string, string>;
     removeEntryKeys?: string[];
-    keepLastMessages?: number | null;
+    preserveTurns?: number | null;
     omitToolCallIds?: string[];
 }
 export type ScratchpadToolResult = {

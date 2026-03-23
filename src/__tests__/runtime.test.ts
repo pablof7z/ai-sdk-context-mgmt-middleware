@@ -203,6 +203,7 @@ describe("createContextManagementRuntime", () => {
 
     await runtime.optionalTools.scratchpad.execute?.(
       {
+        description: "Tracking parser cleanup",
         setEntries: {
           notes: "Track parser cleanup",
         },

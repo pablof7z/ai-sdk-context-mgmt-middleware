@@ -48,6 +48,7 @@ export type {
   ScratchpadStrategyOptions,
   ScratchpadToolInput,
   ScratchpadToolResult,
+  ScratchpadUseNotice,
   SlidingWindowStrategyOptions,
   SummarizationStrategyOptions,
   SystemPromptCachingStrategyOptions,

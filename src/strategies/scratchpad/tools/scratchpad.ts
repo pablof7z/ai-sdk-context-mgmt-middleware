@@ -1,4 +1,8 @@
 import { jsonSchema, tool } from "ai";
+import {
+  countProjectedScratchpadTurns,
+  countScratchpadSemanticTurns,
+} from "../../../prompt-utils.js";
 import { CONTEXT_MANAGEMENT_KEY } from "../../../types.js";
 import type {
   ContextManagementRequestContext,
@@ -10,9 +14,8 @@ import type {
 import {
   dedupeStrings,
   mergeEntryMaps,
-  normalizeAnchorToolCallId,
   normalizeEntryMap,
-  normalizeKeepLastMessages,
+  normalizePreserveTurns,
   normalizeScratchpadState,
   removeEntryKeys,
 } from "../state.js";
@@ -64,11 +67,18 @@ export function createScratchpadTool(options: {
   consumeForcedCall: () => boolean;
 }) {
   return tool<ScratchpadToolInput, ScratchpadToolResult>({
-    description: "Manage your working memory and context window. Use key/value entries to keep the current working state for this run. Multiline values are fine, and common keys include objective, findings, notes, side-effects, and next-steps. Prefer rewriting stale state over keeping a chronological log. Use keepLastMessages and omitToolCallIds to free context when it grows too large.\n\nIMPORTANT: Before pruning context, record in your scratchpad any actions you took that had side effects (file writes, API calls, published events, state changes) so you don't forget or repeat them.\n\nkeepLastMessages preserves the original conversation start and your most recent N messages, removing everything in between.",
+    description: "Manage your working memory and context window. Every call must include a short description of what you are doing. Use key/value entries to keep the current working state for this run. Multiline values are fine, and common keys include objective, findings, notes, side-effects, and next-steps. Prefer rewriting stale state over keeping a chronological log. Use preserveTurns and omitToolCallIds to free context when it grows too large.\n\nIMPORTANT: Before pruning context, record in your scratchpad any actions you took that had side effects (file writes, API calls, published events, state changes) so you don't forget or repeat them.\n\npreserveTurns keeps the first N and last N user/assistant turns from before this scratchpad call, removes the middle, and hides tool use from the visible transcript.",
     inputSchema: jsonSchema({
       type: "object",
       additionalProperties: false,
+      required: ["description"],
       properties: {
+        description: {
+          type: "string",
+          minLength: 1,
+          pattern: "\\S",
+          description: "One-line description of what this scratchpad update is doing right now.",
+        },
         setEntries: {
           type: "object",
           additionalProperties: {
@@ -90,7 +100,7 @@ export function createScratchpadTool(options: {
           },
           description: "Remove specific key/value entries by key name.",
         },
-        keepLastMessages: {
+        preserveTurns: {
           anyOf: [
             {
               type: "integer",
@@ -100,7 +110,7 @@ export function createScratchpadTool(options: {
               type: "null",
             },
           ],
-          description: "Number of recent non-system messages to keep from immediately before this scratchpad call. The conversation start (original task) is always preserved, and messages after this scratchpad call continue to accumulate normally. Use null to clear.",
+          description: "Number of semantic turns to keep from both the head and tail of the pre-scratchpad visible transcript. Only user messages and assistant text replies are preserved in this view. Use null to clear.",
         },
         omitToolCallIds: {
           type: "array",
@@ -128,20 +138,42 @@ export function createScratchpadTool(options: {
         : replacedEntries;
       const nextEntries = removeEntryKeys(mergedEntries, input.removeEntryKeys);
 
-      const keepLastMessages = normalizeKeepLastMessages(input.keepLastMessages);
-      const keepLastMessagesAnchorToolCallId =
-        input.keepLastMessages !== undefined
-          ? normalizeAnchorToolCallId(executeOptions.toolCallId)
-          : currentState.keepLastMessagesAnchorToolCallId;
+      const preserveTurns = input.preserveTurns !== undefined
+        ? normalizePreserveTurns(input.preserveTurns)
+        : currentState.preserveTurns;
+      const description = input.description.trim();
+      if (description.length === 0) {
+        throw new Error("scratchpad tool requires a non-empty description");
+      }
+      const toolCallId = typeof executeOptions.toolCallId === "string" && executeOptions.toolCallId.length > 0
+        ? executeOptions.toolCallId
+        : "scratchpad";
+      const currentVisibleMessages = (executeOptions.messages ?? []) as Array<{ role: string; content: unknown }>;
+      const currentVisibleTurnCount = countScratchpadSemanticTurns(currentVisibleMessages);
+      const previousRawTurnCountAtCall = currentState.activeNotice?.rawTurnCountAtCall ?? 0;
+      const previousProjectedTurnCountAtCall = currentState.activeNotice?.projectedTurnCountAtCall ?? 0;
+      const rawTurnCountAtCall = Math.max(
+        currentVisibleTurnCount,
+        previousRawTurnCountAtCall + currentVisibleTurnCount - previousProjectedTurnCountAtCall
+      );
+      const projectedTurnCountAtCall = countProjectedScratchpadTurns(
+        currentVisibleMessages,
+        preserveTurns
+      );
 
       await options.scratchpadStore.set(key, {
         ...(nextEntries ? { entries: nextEntries } : {}),
-        ...(input.keepLastMessages !== undefined
-          ? { keepLastMessages }
-          : { keepLastMessages: currentState.keepLastMessages }),
-        ...(keepLastMessagesAnchorToolCallId !== undefined
-          ? { keepLastMessagesAnchorToolCallId }
-          : {}),
+        ...(input.preserveTurns !== undefined
+          ? { preserveTurns }
+          : currentState.preserveTurns !== undefined
+            ? { preserveTurns: currentState.preserveTurns }
+            : {}),
+        activeNotice: {
+          description,
+          toolCallId,
+          rawTurnCountAtCall,
+          projectedTurnCountAtCall,
+        },
         ...(input.omitToolCallIds !== undefined
           ? { omitToolCallIds: dedupeStrings(input.omitToolCallIds) }
           : { omitToolCallIds: currentState.omitToolCallIds }),
@@ -154,13 +186,13 @@ export function createScratchpadTool(options: {
       });
 
       if (options.consumeForcedCall()) {
-        const hasPruningParams = input.keepLastMessages !== undefined
+        const hasPruningParams = input.preserveTurns !== undefined
           || (input.omitToolCallIds !== undefined && input.omitToolCallIds.length > 0);
 
         if (!hasPruningParams) {
           return {
             ok: false,
-            error: "Context is critically full. You MUST free context by setting keepLastMessages (integer) to trim old messages, and/or omitToolCallIds (array of tool call IDs) to remove completed tool results. Your scratchpad updates were saved, but you need to call scratchpad again with pruning parameters.",
+            error: "Context is critically full. You MUST free context by setting preserveTurns (integer) to compact older turns, and/or omitToolCallIds (array of tool call IDs) to remove completed tool results. Your scratchpad updates were saved, but you need to call scratchpad again with pruning parameters.",
           };
         }
       }

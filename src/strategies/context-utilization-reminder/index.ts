@@ -27,7 +27,7 @@ function buildReminder(options: {
     lines.push("- Rewrite your current working state so it reflects what matters now");
     lines.push("- Update key/value entries and notes for current progress, findings, and next steps");
     lines.push("- Omit stale tool call IDs you no longer need");
-    lines.push("- Reduce keepLastMessages if the recent tail is larger than necessary");
+    lines.push("- Reduce preserveTurns if the preserved head/tail turns are larger than necessary");
   } else {
     lines.push("Your working context is getting tight. Trim or summarize stale context before continuing.");
   }

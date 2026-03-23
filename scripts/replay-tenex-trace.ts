@@ -252,9 +252,10 @@ function buildScratchpadStateFromTrace(spans: JaegerSpan[], options: {
   }
 
   const args = parseJson<{
+    description?: string;
     setEntries?: Record<string, string>;
     replaceEntries?: Record<string, string>;
-    keepLastMessages?: number | null;
+    preserveTurns?: number | null;
     omitToolCallIds?: string[];
   }>(getTag(latest, "ai.toolCall.args"), "ai.toolCall.args");
 
@@ -262,7 +263,17 @@ function buildScratchpadStateFromTrace(spans: JaegerSpan[], options: {
 
   return {
     ...(entries ? { entries } : {}),
-    ...(args.keepLastMessages !== undefined ? { keepLastMessages: args.keepLastMessages ?? undefined } : {}),
+    ...(args.preserveTurns !== undefined ? { preserveTurns: args.preserveTurns ?? undefined } : {}),
+    ...(args.description
+      ? {
+        activeNotice: {
+          description: args.description,
+          toolCallId: String(getTag(latest, "ai.toolCall.id") ?? latest.spanID),
+          rawTurnCountAtCall: 0,
+          projectedTurnCountAtCall: 0,
+        },
+      }
+      : {}),
     omitToolCallIds: args.omitToolCallIds ?? [],
     agentLabel: options.agentLabel,
   };
@@ -377,9 +388,9 @@ async function main(): Promise<void> {
   });
 
   if (tracedScratchpadState) {
-    await runScenario("same scratchpad but keepLastMessages=1", prompt, {
+    await runScenario("same scratchpad but preserveTurns=1", prompt, {
       ...tracedScratchpadState,
-      keepLastMessages: 1,
+      preserveTurns: 1,
     }, {
       conversationId,
       agentId,
