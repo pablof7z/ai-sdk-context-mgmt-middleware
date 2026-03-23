@@ -55,6 +55,7 @@ The optional `scratchpad(...)` tool accepts:
 Entry names are intentionally open-ended. Agents can use any keys that fit the task, instead of being forced into a fixed schema.
 
 If you want scratchpad forcing to follow a managed working-budget instead of the raw request size, pass `budgetProfile` and `forceToolThresholdRatio` to `ScratchpadStrategy`.
+If your host wants to show custom empty-state key suggestions, pass `emptyStateGuidance` to `ScratchpadStrategy`. The library does not inject those suggestions by default.
 
 ## Good Entry Shapes
 

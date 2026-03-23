@@ -41,6 +41,7 @@ function buildReminderBlock(options: {
   currentContext: ContextManagementRequestContext;
   otherScratchpads: ScratchpadConversationEntry[];
   reminderTone: "informational" | "urgent" | "silent";
+  emptyStateGuidanceLines: string[];
   forced?: boolean;
 }): string {
   const {
@@ -48,6 +49,7 @@ function buildReminderBlock(options: {
     currentContext,
     otherScratchpads,
     reminderTone,
+    emptyStateGuidanceLines,
     forced,
   } = options;
 
@@ -80,10 +82,11 @@ function buildReminderBlock(options: {
       "Failure to free context will result in an error."
     );
   } else if (reminderTone === "informational") {
-    if (currentState.entries === undefined || Object.keys(currentState.entries).length === 0) {
-      lines.push(
-        "Suggested entry names for this run: objective, thesis, findings, notes, side-effects, next-steps. Use any keys that fit the work."
-      );
+    if (
+      (currentState.entries === undefined || Object.keys(currentState.entries).length === 0)
+      && emptyStateGuidanceLines.length > 0
+    ) {
+      lines.push(...emptyStateGuidanceLines);
     }
     lines.push("Use scratchpad(...) proactively to keep this working state current. Prefer rewriting stale entries over keeping a chronological log. Scratchpad entries persist within this conversation only — they do not carry over to new conversations.");
   } else if (reminderTone === "urgent") {
@@ -96,6 +99,7 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
   readonly name = "scratchpad";
   private readonly scratchpadStore: ScratchpadStore;
   private readonly reminderTone: "informational" | "urgent" | "silent";
+  private readonly emptyStateGuidanceLines: string[];
   private readonly budgetProfile?: NormalizedContextBudgetProfile;
   private readonly forceToolThresholdRatio?: number;
   private readonly estimator = createDefaultPromptTokenEstimator();
@@ -115,6 +119,15 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
 
     this.scratchpadStore = options.scratchpadStore;
     this.reminderTone = options.reminderTone ?? "informational";
+    this.emptyStateGuidanceLines = (
+      Array.isArray(options.emptyStateGuidance)
+        ? options.emptyStateGuidance
+        : typeof options.emptyStateGuidance === "string"
+          ? [options.emptyStateGuidance]
+          : []
+    )
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
     this.budgetProfile = normalizedBudgetProfile;
     this.forceToolThresholdRatio = normalizedForceThresholdRatio;
     this.optionalTools = {
@@ -186,6 +199,7 @@ export class ScratchpadStrategy implements ContextManagementStrategy {
       currentContext: state.requestContext,
       otherScratchpads: allScratchpads,
       reminderTone: this.reminderTone,
+      emptyStateGuidanceLines: this.emptyStateGuidanceLines,
       forced: shouldForceToolChoice,
     });
 

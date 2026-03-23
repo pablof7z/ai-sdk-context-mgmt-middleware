@@ -313,6 +313,7 @@ export interface ScratchpadStore {
 export interface ScratchpadStrategyOptions {
   scratchpadStore: ScratchpadStore;
   reminderTone?: "informational" | "urgent" | "silent";
+  emptyStateGuidance?: string | string[];
   budgetProfile?: ContextBudgetProfile;
   forceToolThresholdRatio?: number;
 }

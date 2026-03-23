@@ -258,6 +258,33 @@ describe("ScratchpadStrategy", () => {
     });
   });
 
+  test("does not inject built-in empty-state guidance by default, but renders host guidance when configured", async () => {
+    const defaultStore = new InMemoryScratchpadStore();
+    const defaultStrategy = new ScratchpadStrategy({
+      scratchpadStore: defaultStore,
+    });
+    const defaultState = makeState(makePrompt());
+
+    await defaultStrategy.apply(defaultState as never);
+
+    const defaultReminderText = latestUserReminderText(defaultState.prompt);
+    expect(defaultReminderText).not.toContain("Suggested entry names for this run:");
+    expect(defaultReminderText).toContain("Use scratchpad(...) proactively to keep this working state current.");
+
+    const configuredStore = new InMemoryScratchpadStore();
+    const configuredStrategy = new ScratchpadStrategy({
+      scratchpadStore: configuredStore,
+      emptyStateGuidance: "If helpful, common scratchpad keys include: objective, findings, notes, side-effects, and next-steps. Use any keys that fit the work.",
+    });
+    const configuredState = makeState(makePrompt());
+
+    await configuredStrategy.apply(configuredState as never);
+
+    expect(latestUserReminderText(configuredState.prompt)).toContain(
+      "If helpful, common scratchpad keys include: objective, findings, notes, side-effects, and next-steps. Use any keys that fit the work."
+    );
+  });
+
   test("projects semantic head and tail turns, pairing assistant text across intervening tool messages", async () => {
     const store = new InMemoryScratchpadStore();
     await store.set(

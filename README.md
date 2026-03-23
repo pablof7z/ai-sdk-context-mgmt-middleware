@@ -205,6 +205,8 @@ The tool supports:
 
 Entry names are intentionally unconstrained. Common choices are `objective`, `thesis`, `findings`, `notes`, `side-effects`, and `next-steps`, but the agent can use whatever keys match the task.
 
+Hosts can also pass `emptyStateGuidance` to `ScratchpadStrategy` if they want to inject host-specific empty-scratchpad hints. The library does not add those hints by default.
+
 ## Telemetry
 
 The runtime can emit raw events for every request:
