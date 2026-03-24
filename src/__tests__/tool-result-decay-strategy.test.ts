@@ -697,8 +697,8 @@ describe("ToolResultDecayStrategy", () => {
     await strategy.apply(state);
 
     expect(capturedReminders).toHaveLength(1);
-    expect(capturedReminders[0].content).toContain("call-0");
-    expect(capturedReminders[0].content).toContain("truncated");
+    expect(capturedReminders[0].content).toContain("[call-0]");
+    expect(capturedReminders[0].content).toContain("[read_file]");
   });
 
   test("warning reminder emitted for very large results exceeding baseMaxChars", async () => {
@@ -716,9 +716,8 @@ describe("ToolResultDecayStrategy", () => {
 
     expect(capturedReminders).toHaveLength(1);
     expect(capturedReminders[0].kind).toBe("tool-result-decay");
-    expect(capturedReminders[0].content).toContain("call-0");
-    expect(capturedReminders[0].content).toContain("read_file");
-    expect(capturedReminders[0].content).toContain("truncated");
+    expect(capturedReminders[0].content).toContain("[call-0]");
+    expect(capturedReminders[0].content).toContain("[read_file]");
   });
 
   test("no warning for small results", async () => {
@@ -1102,7 +1101,7 @@ describe("ToolResultDecayStrategy", () => {
 
     expect(capturedReminders).toHaveLength(1);
     expect(capturedReminders[0].kind).toBe("tool-result-decay");
-    expect(capturedReminders[0].content).toContain("10,000");
+    expect(capturedReminders[0].content).toContain("at risk");
     expect(capturedReminders[0].attributes).toBeUndefined();
     expect(result.payloads).toHaveProperty("warningToolCallIds");
     expect(result.payloads).toHaveProperty("warningPlaceholderIds");

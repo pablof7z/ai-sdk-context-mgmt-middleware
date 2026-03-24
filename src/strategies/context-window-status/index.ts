@@ -47,7 +47,6 @@ function buildReminder(options: {
     workingTokenBudget,
   } = options;
   const lines = [
-    "[Context status]",
     `Current request after context management: ~${formatNumber(estimatedRequestTokens)} tokens.`,
   ];
 
@@ -84,8 +83,6 @@ function buildReminder(options: {
       `Raw model context window: ~${formatNumber(rawContextWindow)} tokens (~${formatPercent(estimatedRequestTokens, rawContextWindow)}% used).`
     );
   }
-
-  lines.push("[/Context status]");
   return lines.join("\n");
 }
 

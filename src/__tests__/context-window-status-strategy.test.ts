@@ -69,6 +69,8 @@ describe("ContextWindowStatusStrategy", () => {
     expect(JSON.stringify(transformed?.prompt)).toContain("Breakdown: ~120 message tokens + ~30 tool-definition tokens.");
     expect(JSON.stringify(transformed?.prompt)).toContain("managed working budget target: ~400 tokens (~20% used).");
     expect(JSON.stringify(transformed?.prompt)).toContain("Raw model context window: ~200,000 tokens (~0% used).");
+    expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context status]");
+    expect(JSON.stringify(transformed?.prompt)).not.toContain("[/Context status]");
 
     const strategyEvent = events.find((event) => event.type === "strategy-complete");
     expect(strategyEvent).toBeDefined();
@@ -87,6 +89,8 @@ describe("ContextWindowStatusStrategy", () => {
           reminderText: expect.stringContaining("Current request after context management"),
         })
       );
+      expect(strategyEvent.strategyPayload?.reminderText).not.toContain("[Context status]");
+      expect(strategyEvent.strategyPayload?.reminderText).not.toContain("[/Context status]");
     }
   });
 

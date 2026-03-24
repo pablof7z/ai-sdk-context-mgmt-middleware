@@ -453,6 +453,13 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       const depth = depthMap.get(exchange.toolCallId)!;
       const estimatedChars = charEstimates.get(exchange.toolCallId) ?? 0;
       const currentAction = actions.get(exchange.toolCallId)!;
+
+      // Don't warn about results already being decayed in this pass —
+      // the agent can't "save" data it can no longer see.
+      if (currentAction.type !== "full") {
+        continue;
+      }
+
       const forecastAction = classifyExchange(
         depth + 1,
         estimatedChars,
@@ -508,7 +515,7 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
     if (!hasMutations) {
       if (atRiskExchanges.length > 0) {
-        await this.emitDecayWarning(state, atRiskExchanges, forecastToolContextTokens);
+        await this.emitDecayWarning(state, atRiskExchanges);
       }
 
       return {
@@ -539,7 +546,7 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
     }
 
     if (atRiskExchanges.length > 0) {
-      await this.emitDecayWarning(state, atRiskExchanges, forecastToolContextTokens);
+      await this.emitDecayWarning(state, atRiskExchanges);
     }
 
     const prompt = clonePrompt(state.prompt);
@@ -645,11 +652,9 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
   private async emitDecayWarning(
     state: ContextManagementStrategyState,
     atRisk: AtRiskExchange[],
-    forecastToolContextTokens: number
   ): Promise<void> {
     const lines = [
-      `Context decay notice: If the next step adds about ${this.warningForecastExtraTokens.toLocaleString("en-US")} tool-context tokens (to roughly ${forecastToolContextTokens.toLocaleString("en-US")} total tool-context tokens), the following tool results will be compressed.`,
-      "Save or restate anything important now.",
+      "The following tool results you used are at risk of being removed from your prompt. If you need to preserve any of it, take note of anything you might need from them:",
     ];
 
     for (const entry of atRisk) {
@@ -668,18 +673,9 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
         continue;
       }
 
-      if (entry.forecastAction.type === "placeholder") {
-        lines.push(
-          `- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens -> placeholder`
-        );
-        continue;
-      }
-
-      if (entry.forecastAction.type === "truncate") {
-        lines.push(
-          `- ${entry.toolCallId} (${entry.toolName}): ~${estimatedTokens.toLocaleString("en-US")} tokens -> truncated to ~${entry.forecastAction.maxChars.toLocaleString("en-US")} chars`
-        );
-      }
+      lines.push(
+        `- [${entry.toolCallId}] [${entry.toolName}] (~${estimatedTokens.toLocaleString("en-US")} tokens)`
+      );
     }
 
     await state.emitReminder({
