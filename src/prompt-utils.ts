@@ -431,6 +431,91 @@ export function countProjectedScratchpadTurns(
     : normalizedPreserveTurns * 2;
 }
 
+function replaceScratchpadExchangesWithNotices(
+  prompt: LanguageModelV3Prompt,
+  activeToolCallId: string
+): LanguageModelV3Prompt {
+  const exchanges = collectToolExchanges(prompt);
+
+  const scratchpadNotices = new Map<string, string>();
+  for (const exchange of exchanges.values()) {
+    if (exchange.toolName !== "scratchpad" || exchange.toolCallId === activeToolCallId) {
+      continue;
+    }
+
+    let description = "scratchpad update";
+    if (exchange.callMessageIndex !== undefined) {
+      const callMessage = prompt[exchange.callMessageIndex];
+      if (callMessage.role !== "system") {
+        for (const part of callMessage.content) {
+          if (
+            isToolCallPart(part) &&
+            part.toolCallId === exchange.toolCallId &&
+            isRecord(part.input) &&
+            typeof (part.input as Record<string, unknown>).description === "string"
+          ) {
+            description = (part.input as Record<string, unknown>).description as string;
+            break;
+          }
+        }
+      }
+    }
+
+    scratchpadNotices.set(exchange.toolCallId, description);
+  }
+
+  if (scratchpadNotices.size === 0) {
+    return prompt;
+  }
+
+  const emittedNotices = new Set<string>();
+  const result: LanguageModelV3Prompt = [];
+
+  for (const message of prompt) {
+    if (message.role === "system" || message.role === "user") {
+      result.push(message);
+      continue;
+    }
+
+    const scratchpadCallIds: string[] = [];
+    const filteredContent = message.content.filter((part) => {
+      if (isToolCallPart(part) && scratchpadNotices.has(part.toolCallId)) {
+        scratchpadCallIds.push(part.toolCallId);
+        return false;
+      }
+      if (isToolResultPart(part) && scratchpadNotices.has(part.toolCallId)) {
+        return false;
+      }
+      return true;
+    });
+
+    if (filteredContent.length > 0) {
+      if (filteredContent.length === message.content.length) {
+        result.push(message);
+      } else if (message.role === "assistant") {
+        result.push({
+          ...message,
+          content: filteredContent as typeof message.content,
+        });
+      } else {
+        result.push({
+          ...message,
+          content: filteredContent as typeof message.content,
+        });
+      }
+    }
+
+    for (const toolCallId of scratchpadCallIds) {
+      if (!emittedNotices.has(toolCallId)) {
+        result.push(buildScratchpadUseNoticeMessage(scratchpadNotices.get(toolCallId)!));
+        emittedNotices.add(toolCallId);
+      }
+    }
+  }
+
+  return result;
+}
+
 export function projectScratchpadPrompt(
   prompt: LanguageModelV3Prompt,
   options: {
@@ -442,7 +527,10 @@ export function projectScratchpadPrompt(
     return clonePrompt(prompt);
   }
 
-  const promptWithoutNotices = removeScratchpadUseNotices(prompt);
+  const promptWithoutNotices = replaceScratchpadExchangesWithNotices(
+    removeScratchpadUseNotices(prompt),
+    options.notice.toolCallId
+  );
   const noticeMessage = buildScratchpadUseNoticeMessage(options.notice.description);
   const exchanges = collectToolExchanges(promptWithoutNotices);
   const noticeExchange = exchanges.get(options.notice.toolCallId);
