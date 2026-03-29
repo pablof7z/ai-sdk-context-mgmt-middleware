@@ -31,7 +31,6 @@ describe("context management runtime integration", () => {
     const runtime = createContextManagementRuntime({
       strategies: [
         new ToolResultDecayStrategy({
-          maxPromptTokens: 60,
           estimator,
         }),
         new SummarizationStrategy({

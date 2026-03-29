@@ -231,7 +231,6 @@ export interface ToolResultDecayPressureAnchor {
 export interface ToolResultDecayStrategyOptions {
   maxResultTokens?: number;
   placeholderMinSourceTokens?: number;
-  maxPromptTokens?: number;
   placeholder?: string | ((context: DecayedToolContext) => string);
   decayInputs?: boolean;
   estimator?: PromptTokenEstimator;

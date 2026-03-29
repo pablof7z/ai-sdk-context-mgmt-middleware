@@ -191,7 +191,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
   readonly name = "tool-result-decay";
   private readonly maxResultTokens: number;
   private readonly placeholderMinSourceTokens: number;
-  private readonly maxPromptTokens?: number;
   private readonly placeholder: string | ((context: DecayedToolContext) => string);
   private readonly decayInputs: boolean;
   private readonly estimator;
@@ -204,7 +203,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
       0,
       Math.floor(options.placeholderMinSourceTokens ?? DEFAULT_PLACEHOLDER_MIN_SOURCE_TOKENS)
     );
-    this.maxPromptTokens = options.maxPromptTokens;
     this.placeholder = options.placeholder ?? DEFAULT_PLACEHOLDER;
     this.decayInputs = options.decayInputs ?? true;
     this.estimator = options.estimator ?? createDefaultPromptTokenEstimator();
@@ -219,27 +217,11 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
     const currentPromptTokens = this.estimator.estimatePrompt(state.prompt)
       + (this.estimator.estimateTools?.(state.params?.tools) ?? 0);
 
-    if (this.maxPromptTokens !== undefined && currentPromptTokens <= this.maxPromptTokens) {
-      return {
-        reason: "below-token-threshold",
-        workingTokenBudget: this.maxPromptTokens,
-        payloads: {
-          kind: "tool-result-decay",
-          currentPromptTokens,
-          maxResultTokens: this.maxResultTokens,
-          placeholderMinSourceTokens: this.placeholderMinSourceTokens,
-          pressureAnchors: this.pressureAnchors.map((anchor) => ({ ...anchor })),
-          warningForecastExtraTokens: this.warningForecastExtraTokens,
-        },
-      };
-    }
-
     const exchanges = collectToolExchanges(state.prompt);
 
     if (exchanges.size === 0) {
       return {
         reason: "no-tool-exchanges",
-        workingTokenBudget: this.maxPromptTokens,
         payloads: {
           kind: "tool-result-decay",
           currentPromptTokens,
@@ -393,7 +375,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
       return {
         reason: "tool-results-decayed",
-        workingTokenBudget: this.maxPromptTokens,
         payloads: {
           kind: "tool-result-decay",
           currentPromptTokens,
@@ -468,7 +449,6 @@ export class ToolResultDecayStrategy implements ContextManagementStrategy {
 
     return {
       reason: "tool-results-decayed",
-      workingTokenBudget: this.maxPromptTokens,
       payloads: {
         kind: "tool-result-decay",
         currentPromptTokens,

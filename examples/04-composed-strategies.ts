@@ -31,7 +31,6 @@ async function main() {
     strategies: [
       new SystemPromptCachingStrategy(),
       new ToolResultDecayStrategy({
-        maxPromptTokens: 120,
         maxResultTokens: 10,
         placeholderMinSourceTokens: 0,
         placeholder: "[omitted]",

@@ -35,7 +35,7 @@ const requestContext = {
 };
 
 const runtime = createContextManagementRuntime({
-  strategies: [new ToolResultDecayStrategy({ maxPromptTokens: 24_000 })],
+  strategies: [new ToolResultDecayStrategy()],
 });
 
 const prepared = await runtime.prepareRequest({
@@ -101,7 +101,7 @@ Per-strategy docs live in [`src/strategies/`](./src/strategies/README.md).
 | --- | --- | --- | --- | --- |
 | `SystemPromptCachingStrategy` | Moves system messages into a stable prefix and can consolidate them | Better cache reuse and less prompt churn | [docs](./src/strategies/system-prompt-caching/README.md) | [06-system-prompt-caching.ts](./examples/06-system-prompt-caching.ts) |
 | `SlidingWindowStrategy` | Keeps the recent tail, can optionally preserve a head, and drops older non-system turns | Bounded context with simple recency bias or setup preservation | [docs](./src/strategies/sliding-window/README.md) | [01-sliding-window.ts](./examples/01-sliding-window.ts) |
-| `ToolResultDecayStrategy` | Leaves recent tool results raw, then replaces older oversized results with placeholders based on depth and total tool-context pressure | Keeps the reasoning chain while hiding only the heaviest payloads when tool usage actually grows | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
+| `ToolResultDecayStrategy` | Leaves recent tool results raw, then replaces older oversized results with placeholders based on depth and total tool-context pressure | Keeps the reasoning chain while continuously hiding stale heavy payloads without waiting for a prompt-budget cliff | [docs](./src/strategies/tool-result-decay/README.md) | [02-tool-result-decay.ts](./examples/02-tool-result-decay.ts) |
 | `SummarizationStrategy` | Replaces older turns with a tagged summary block using either `summarize(...)` or `model` | Older facts survive in compressed form without replaying the whole middle | [docs](./src/strategies/summarization/README.md) | [03-summarization.ts](./examples/03-summarization.ts), [07-model-backed-summarization.ts](./examples/07-model-backed-summarization.ts) |
 | `ScratchpadStrategy` | Injects persisted scratchpad state and can remove stale tool exchanges | Structured working state, note edits, and selective forgetting | [docs](./src/strategies/scratchpad/README.md) | [08-scratchpad.ts](./examples/08-scratchpad.ts) |
 | `PinnedMessagesStrategy` | Marks specific tool call IDs as protected before pruning | Lets the agent keep the evidence it considers critical | [docs](./src/strategies/pinned-messages/README.md) | [09-pinned-messages.ts](./examples/09-pinned-messages.ts) |
@@ -147,6 +147,8 @@ In practice that usually means:
   - `50_000 -> 5`
 
 That means low-token tool usage can remain intact for many turns, while heavy tool sessions decay aggressively much earlier.
+
+There is no total-prompt activation threshold. Tool-result decay runs on every prompt so large stale tool payloads do not linger just because the overall request is still under budget.
 
 You can tune the curve with `pressureAnchors` and the warning forecast with `warningForecastExtraTokens`:
 

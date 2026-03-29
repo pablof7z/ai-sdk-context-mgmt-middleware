@@ -2,6 +2,8 @@
 
 Replaces oversized tool outputs with placeholders based on age and tool-context pressure while preserving the surrounding tool-call structure.
 
+The strategy is always-on. Total prompt size is telemetry, not an activation gate.
+
 ## What Changes In The Prompt
 
 - newest tool results stay verbatim

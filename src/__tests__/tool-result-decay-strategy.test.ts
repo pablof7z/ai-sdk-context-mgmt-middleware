@@ -192,22 +192,29 @@ function makeToolPromptWithOutputs(
 }
 
 describe("ToolResultDecayStrategy", () => {
-  test("does nothing when maxPromptTokens is not exceeded", async () => {
-    const prompt = makeToolPrompt(10);
+  test("still applies decay when the total prompt estimate is low", async () => {
+    const prompt = makeToolPromptWithOutputs([
+      { id: "call-0", name: "tool_0", output: { type: "text" as const, value: "x".repeat(5000) } },
+      { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "recent" } },
+    ]);
     const strategy = createDepthOnlyStrategy({
-      maxPromptTokens: 10_000,
       estimator: {
         estimateMessage: () => 1,
         estimatePrompt: () => 100,
       },
     });
     const { state, capturedRemoved } = createMockState(prompt);
-    const originalCall0 = getToolResultOutput(prompt, "call-0");
 
     await strategy.apply(state);
 
-    expect(getToolResultOutput(state.prompt, "call-0")).toBe(originalCall0);
-    expect(capturedRemoved).toEqual([]);
+    expect(getToolResultOutput(state.prompt, "call-0")).toBe("[result omitted]");
+    expect(capturedRemoved).toEqual([
+      {
+        reason: "tool-result-decay",
+        toolCallId: "call-0",
+        toolName: "tool_0",
+      },
+    ]);
   });
 
   test("depth 0 (most recent) is never touched regardless of result size", async () => {
@@ -729,10 +736,12 @@ describe("ToolResultDecayStrategy", () => {
     expect(capturedReminders).toHaveLength(0);
   });
 
-  test("maxPromptTokens gate still works (skip when under budget)", async () => {
-    const prompt = makeToolPrompt(10);
+  test("returns tool-results-decayed even when the total prompt estimate is low", async () => {
+    const prompt = makeToolPromptWithOutputs([
+      { id: "call-0", name: "tool_0", output: { type: "text" as const, value: "x".repeat(5000) } },
+      { id: "call-1", name: "tool_1", output: { type: "text" as const, value: "recent" } },
+    ]);
     const strategy = createDepthOnlyStrategy({
-      maxPromptTokens: 10_000,
       estimator: {
         estimateMessage: () => 1,
         estimatePrompt: () => 100,
@@ -742,7 +751,7 @@ describe("ToolResultDecayStrategy", () => {
 
     const result = await strategy.apply(state);
 
-    expect(result.reason).toBe("below-token-threshold");
+    expect(result.reason).toBe("tool-results-decayed");
   });
 
   test("returns correct payload fields", async () => {
