@@ -194,7 +194,7 @@ All examples are local and deterministic. They use mock models, print the transf
 | [07-model-backed-summarization.ts](./examples/07-model-backed-summarization.ts) | `cd examples && npx tsx 07-model-backed-summarization.ts` | A model-generated summary replaces older discussion |
 | [08-scratchpad.ts](./examples/08-scratchpad.ts) | `cd examples && npx tsx 08-scratchpad.ts` | `scratchpad(...)` changes what the next turn sees |
 | [09-pinned-messages.ts](./examples/09-pinned-messages.ts) | `cd examples && npx tsx 09-pinned-messages.ts` | One pinned tool result survives while other old ones decay |
-| [10-compaction-tool.ts](./examples/10-compaction-tool.ts) | `cd examples && npx tsx 10-compaction-tool.ts` | `compact_context({ message, from?, to? })` compacts now and reapplies the stored compaction later |
+| [10-compaction-tool.ts](./examples/10-compaction-tool.ts) | `cd examples && npx tsx 10-compaction-tool.ts` | `compact_context({ guidance?, from?, to? })` asks the host to compact now and reapplies the stored compaction later |
 | [11-context-utilization-reminder.ts](./examples/11-context-utilization-reminder.ts) | `cd examples && npx tsx 11-context-utilization-reminder.ts` | `RemindersStrategy` adds a warning before hard pruning starts |
 
 See [`examples/README.md`](./examples/README.md) for the full example index.

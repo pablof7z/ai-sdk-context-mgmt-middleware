@@ -58,6 +58,10 @@ async function main() {
             compactions.set(`${conversationId}:${agentId}`, state);
           },
         },
+        onCompact: async ({ steeringMessage }) =>
+          steeringMessage
+            ? `Host summary:\n${steeringMessage}`
+            : "Host summary:\nTask: inspect service config and tests.\nCompleted: config uses port 3000 and tests bootstrap a DB.",
       }),
     ],
   });
@@ -65,7 +69,7 @@ async function main() {
   const toolResult = await ((runtime.optionalTools.compact_context as unknown) as {
     execute: (
       input: {
-        message: string;
+        guidance?: string;
         from?: string;
         to?: string;
       },
@@ -73,7 +77,7 @@ async function main() {
     ) => Promise<unknown>;
   }).execute(
     {
-      message:
+      guidance:
         "Task: inspect service config and tests.\nCompleted: config uses port 3000 and tests bootstrap a DB.\nImportant Findings: parser issue remains around trailing commas.\nOpen Issues: fix parser handling.\nNext Steps: patch the parser and rerun tests.\nPersistent Facts: keep localhost/debug details in mind.",
       from: "Read config.json.",
       to: "Tests create and clean up a database.",
@@ -104,8 +108,8 @@ async function main() {
   console.log("\nTool result from compact_context(...):");
   console.log(JSON.stringify(toolResult, null, 2));
   console.log("\nWhat changed:");
-  console.log("- compact_context(...) queued an anchored replacement over the older user/assistant span");
-  console.log("- the first call replaced that span with the supplied continuation summary");
+  console.log("- compact_context(...) queued an anchored host-driven compaction over the older user/assistant span");
+  console.log("- the first call replaced that span with the host-generated continuation summary");
   console.log("- the second call re-applied the stored compaction before the new request");
 }
 

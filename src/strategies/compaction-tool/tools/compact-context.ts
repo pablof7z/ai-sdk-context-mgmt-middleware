@@ -166,20 +166,22 @@ function buildError(error: string): CompactionToolResult {
 }
 
 export function createCompactContextTool(options: {
-  queueEdit: (context: ContextManagementRequestContext, edit: CompactionEdit) => void;
+  queueEdit: (
+    context: ContextManagementRequestContext,
+    edit: CompactionEdit
+  ) => true | string;
 }) {
   return tool<CompactionToolInput, CompactionToolResult>({
-    description: "Replace stale user/assistant history with a compact continuation summary for future turns. Provide the replacement summary in message. Optionally provide from and to as exact quoted excerpts from visible user or assistant messages. When omitted, the compaction expands across the oldest/newest eligible historical user or assistant messages before the active tail.",
+    description: "Request host-driven compaction of stale user/assistant history into a continuation summary for future turns. Optionally provide guidance for what the summary should emphasize. Optionally provide from and to as exact quoted excerpts from visible user or assistant messages. When omitted, the compaction expands across the oldest/newest eligible historical user or assistant messages before the active tail.",
     inputSchema: jsonSchema({
       type: "object",
       additionalProperties: false,
-      required: ["message"],
       properties: {
-        message: {
+        guidance: {
           type: "string",
           minLength: 1,
           pattern: "\\S",
-          description: "The replacement summary text that should stand in for the compacted span.",
+          description: "Optional steering guidance telling the host summarizer what to emphasize in the compaction.",
         },
         from: {
           type: "string",
@@ -199,10 +201,9 @@ export function createCompactContextTool(options: {
       const requestContext = extractRequestContextFromExperimentalContext(
         executeOptions.experimental_context
       );
-      const replacement = input.message.trim();
-      if (replacement.length === 0) {
-        return buildError("compact_context requires a non-empty message");
-      }
+      const steeringMessage = typeof input.guidance === "string"
+        ? input.guidance.trim()
+        : undefined;
 
       const candidates = buildVisibleCandidates((executeOptions.messages ?? []) as ModelMessage[]);
       if (candidates.length === 0) {
@@ -246,14 +247,18 @@ export function createCompactContextTool(options: {
         source: "manual",
         start: startCandidate.range.start,
         end: endCandidate.range.end,
-        replacement,
+        replacement: "__PENDING_HOST_COMPACTION__",
         createdAt: Date.now(),
         compactedMessageCount,
+        ...(steeringMessage ? { steeringMessage } : {}),
         ...(input.from ? { fromText: normalizeCompactionText(input.from) } : {}),
         ...(input.to ? { toText: normalizeCompactionText(input.to) } : {}),
       };
 
-      options.queueEdit(requestContext, queuedEdit);
+      const queueResult = options.queueEdit(requestContext, queuedEdit);
+      if (queueResult !== true) {
+        return buildError(queueResult);
+      }
 
       return {
         ok: true,

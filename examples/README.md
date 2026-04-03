@@ -66,7 +66,7 @@ npx tsx 01-sliding-window.ts
 
 ### `10-compaction-tool.ts`
 
-- shows `compact_context({ message, from?, to? })` queuing an anchored compaction for the next call
+- shows `compact_context({ guidance?, from?, to? })` queuing an anchored host-driven compaction for the next call
 - look for the stored compaction being re-applied again on the following turn
 
 ### `11-context-utilization-reminder.ts`

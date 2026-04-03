@@ -407,6 +407,7 @@ export interface CompactionEdit {
   replacement: string;
   createdAt: number;
   compactedMessageCount: number;
+  steeringMessage?: string;
   fromText?: string;
   toText?: string;
 }
@@ -423,7 +424,7 @@ export interface CompactionStore {
 }
 
 export interface CompactionToolInput {
-  message: string;
+  guidance?: string;
   from?: string;
   to?: string;
 }
@@ -450,6 +451,9 @@ export interface CompactionOnCompactArgs {
   state: ContextManagementStrategyState;
   prompt: LanguageModelV3Prompt;
   messages: LanguageModelV3Message[];
+  requestContext: ContextManagementRequestContext;
+  mode: "manual" | "auto";
+  steeringMessage?: string;
 }
 
 export interface CompactionToolStrategyOptions {

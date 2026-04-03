@@ -113,8 +113,13 @@ describe("CompactionToolStrategy", () => {
 
   test("manual compact_context queues and applies a selected span", async () => {
     const store = new InMemoryCompactionStore();
+    const onCompact = async ({ steeringMessage }: { steeringMessage?: string }) =>
+      steeringMessage
+        ? `Host summary: ${steeringMessage}`
+        : "Host summary: parser investigation complete.";
     const strategy = new CompactionToolStrategy({
       compactionStore: store,
+      onCompact,
     });
     const prompt = makeAddressablePrompt();
 
@@ -122,7 +127,7 @@ describe("CompactionToolStrategy", () => {
       {
         from: "Investigate parser issue",
         to: "old comment branch",
-        message: "Parser investigation complete. The old comment branch caused the failure.",
+        guidance: "Parser investigation complete. The old comment branch caused the failure.",
       },
       {
         toolCallId: "tool-call-1",
@@ -149,7 +154,7 @@ describe("CompactionToolStrategy", () => {
 
     expect(state.prompt.some((message) =>
       message.role === "assistant"
-      && JSON.stringify(message.content).includes("old comment branch caused the failure")
+      && JSON.stringify(message.content).includes("Host summary: Parser investigation complete. The old comment branch caused the failure.")
     )).toBe(true);
     expect(state.prompt.some((message) => JSON.stringify(message.content).includes("Please continue with the fix."))).toBe(true);
     expect(state.removedToolExchanges).toEqual([
@@ -164,19 +169,21 @@ describe("CompactionToolStrategy", () => {
     expect(stored?.edits).toHaveLength(1);
     expect(stored?.edits[0]?.start.sourceRecordId).toBe("record:1");
     expect(stored?.edits[0]?.end.sourceRecordId).toBe("record:6");
+    expect(stored?.edits[0]?.steeringMessage).toBe(
+      "Parser investigation complete. The old comment branch caused the failure."
+    );
   });
 
   test("omitted anchors compact the full eligible historical span", async () => {
     const store = new InMemoryCompactionStore();
     const strategy = new CompactionToolStrategy({
       compactionStore: store,
+      onCompact: async () => "Older parser investigation summarized.",
     });
     const prompt = makeAddressablePrompt();
 
     const result = await strategy.getOptionalTools().compact_context.execute?.(
-      {
-        message: "Older parser investigation summarized.",
-      },
+      {},
       {
         toolCallId: "tool-call-2",
         messages: prompt as never[],
@@ -207,7 +214,9 @@ describe("CompactionToolStrategy", () => {
   });
 
   test("rejects ambiguous manual matches", async () => {
-    const strategy = new CompactionToolStrategy({});
+    const strategy = new CompactionToolStrategy({
+      onCompact: async () => "unused",
+    });
     const basePrompt = makeAddressablePrompt();
     const prompt = [
       ...basePrompt.slice(0, 7),
@@ -224,7 +233,7 @@ describe("CompactionToolStrategy", () => {
     const result = await strategy.getOptionalTools().compact_context.execute?.(
       {
         from: "opened the parser files",
-        message: "ambiguous",
+        guidance: "ambiguous",
       },
       {
         toolCallId: "tool-call-3",
@@ -245,13 +254,15 @@ describe("CompactionToolStrategy", () => {
   });
 
   test("rejects manual compaction that targets the protected active tail", async () => {
-    const strategy = new CompactionToolStrategy({});
+    const strategy = new CompactionToolStrategy({
+      onCompact: async () => "unused",
+    });
     const prompt = makeAddressablePrompt();
 
     const result = await strategy.getOptionalTools().compact_context.execute?.(
       {
         from: "Please continue with the fix.",
-        message: "should fail",
+        guidance: "should fail",
       },
       {
         toolCallId: "tool-call-4",
@@ -268,6 +279,30 @@ describe("CompactionToolStrategy", () => {
     expect(result).toEqual({
       ok: false,
       error: "The `from` excerpt did not match any eligible historical user or assistant message.",
+    });
+  });
+
+  test("manual compact_context is unavailable without a host summarizer", async () => {
+    const strategy = new CompactionToolStrategy({});
+    const prompt = makeAddressablePrompt();
+
+    const result = await strategy.getOptionalTools().compact_context.execute?.(
+      {},
+      {
+        toolCallId: "tool-call-unavailable",
+        messages: prompt as never[],
+        experimental_context: {
+          contextManagement: {
+            conversationId: "conv-1",
+            agentId: "agent-1",
+          },
+        },
+      }
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "compact_context is unavailable because no host compaction summarizer is configured.",
     });
   });
 

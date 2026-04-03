@@ -334,7 +334,7 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
   private readonly pendingManualEdits = new Map<string, CompactionEdit[]>();
 
   constructor(options: CompactionToolStrategyOptions) {
-    if ((options.shouldCompact && !options.onCompact) || (!options.shouldCompact && options.onCompact)) {
+    if (options.shouldCompact && !options.onCompact) {
       throw new Error("CompactionToolStrategy requires both shouldCompact and onCompact for auto-compaction");
     }
 
@@ -348,9 +348,13 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
     this.optionalTools = {
       compact_context: createCompactContextTool({
         queueEdit: (requestContext, edit) => {
+          if (!this.onCompact) {
+            return "compact_context is unavailable because no host compaction summarizer is configured.";
+          }
           const requestKey = buildCompactionRequestKey(requestContext);
           const current = this.pendingManualEdits.get(requestKey) ?? [];
           this.pendingManualEdits.set(requestKey, [...current, cloneCompactionEdit(edit)]);
+          return true;
         },
       }),
     };
@@ -392,10 +396,38 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
       const appliedManualEdits: CompactionEdit[] = [];
 
       for (const manualEdit of pendingManualEdits) {
+        if (!this.onCompact) {
+          finalReason = "manual-compaction-unavailable";
+          this.pendingManualEdits.delete(requestKey);
+          break;
+        }
+        const resolvedSpan = resolveSingleEdit(visiblePrompt, manualEdit);
+        if (!resolvedSpan) {
+          continue;
+        }
+
+        const replacement = (await this.onCompact({
+          state,
+          prompt: visiblePrompt,
+          messages: visiblePrompt.slice(
+            resolvedSpan.startIndex,
+            resolvedSpan.endIndex + 1
+          ) as LanguageModelV3Message[],
+          requestContext: state.requestContext,
+          mode: "manual",
+          steeringMessage: manualEdit.steeringMessage,
+        } satisfies CompactionOnCompactArgs)).trim();
+        if (replacement.length === 0) {
+          continue;
+        }
+        const resolvedManualEdit: CompactionEdit = {
+          ...manualEdit,
+          replacement,
+        };
         const beforeMerge = mergedEdits.map((edit) => edit.id).join(",");
-        mergedEdits = mergeCompactionEdit(originalPrompt, mergedEdits, manualEdit);
-        if (mergedEdits.map((edit) => edit.id).join(",") !== beforeMerge || mergedEdits.some((edit) => edit.id === manualEdit.id)) {
-          appliedManualEdits.push(manualEdit);
+        mergedEdits = mergeCompactionEdit(originalPrompt, mergedEdits, resolvedManualEdit);
+        if (mergedEdits.map((edit) => edit.id).join(",") !== beforeMerge || mergedEdits.some((edit) => edit.id === resolvedManualEdit.id)) {
+          appliedManualEdits.push(resolvedManualEdit);
         }
       }
 
@@ -436,6 +468,8 @@ export class CompactionToolStrategy implements ContextManagementStrategy {
             state,
             prompt: visiblePrompt,
             messages: summarizableMessages,
+            requestContext: state.requestContext,
+            mode: "auto",
           } satisfies CompactionOnCompactArgs)).trim();
 
           if (replacement.length > 0) {
